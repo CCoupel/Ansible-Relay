@@ -34,7 +34,7 @@ Pour chaque tâche Phase 1 dans l'ordre des dépendances :
 - ✓ TOUTES tâches #4-#23 completed
 - ✓ qa : 0 test en échec
 - ✓ security-reviewer : 0 finding CRITIQUE/HAUT
-- ✓ Message deploy-qualif : "Déploie Phase 1 sur 192.168.1.217. Rapport : statut services, URL accessible."
+- ✓ Message deploy-qualif : "Déploie Phase 1 sur 192.168.1.218. Rapport : statut services, URL accessible."
 - ✓ Attendre rapport deploy-qualif
   - **Si ÉCHEC** : alerte utilisateur + rapport complet + attendre instructions
   - **Si OK** : notifier utilisateur "Phase 1 terminée. relay-agent déployé. Lancer Phase 2 ?"
@@ -50,7 +50,7 @@ Même processus que Phase 1, avec **dev-relay** à la place de dev-agent.
 - ✓ TOUTES tâches #24-#34 completed
 - ✓ qa : 0 test en échec
 - ✓ security-reviewer : 0 finding CRITIQUE/HAUT
-- ✓ Message deploy-qualif : "Déploie Phase 2 sur 192.168.1.217. Rapport : statut services, URL accessible."
+- ✓ Message deploy-qualif : "Déploie Phase 2 sur 192.168.1.218. Rapport : statut services, URL accessible."
 - ✓ Attendre rapport deploy-qualif
   - **Si ÉCHEC** : alerte utilisateur + rapport complet + attendre instructions
   - **Si OK** : notifier utilisateur "Phase 2 terminée. relay-server déployé. Lancer Phase 3 ?"
@@ -66,10 +66,10 @@ Même processus, avec **dev-plugins**.
 
 1. **Message qa** : "Lance tests E2E complets (enrollment → playbook exécuté). Rapport : couverture nominaux, erreurs (agent offline, timeout, become), async."
 2. **Message security-reviewer** : "Audit final global : revue croisée 3 composants, cohérence sécurité bout-en-bout."
-3. **Quand qa + security valident** : Message deploy-qualif : "Déploie intégrité (agent + serveur + plugins) sur 192.168.1.217. Rapport : statut services, URL accessible."
+3. **Quand qa + security valident** : Message deploy-qualif : "Déploie intégrité (agent + serveur + plugins) sur 192.168.1.218. Rapport : statut services, URL accessible."
 4. **Attendre rapport deploy-qualif**
    - **Si ÉCHEC** : alerte utilisateur + rapport complet + attendre instructions
-   - **Si OK** : notifier utilisateur "Validation qualif réussie. Tous composants déployés sur 192.168.1.217. Lancer déploiement prod (Kubernetes) ?"
+   - **Si OK** : notifier utilisateur "Validation qualif réussie. Tous composants déployés sur 192.168.1.218. Lancer déploiement prod (Kubernetes) ?"
 5. **Attendre ordre EXPLICITE utilisateur** avant prod
 6. **Message deploy-prod** : "Déploie AnsibleRelay Kubernetes via Helm chart. Kubeconfig : C:/Users/cyril/Documents/VScode/kubeconfig.txt. Rapport : pods Running, ingress accessible."
 7. **Attendre rapport deploy-prod**
@@ -136,7 +136,7 @@ Checklist : [items sécurité]
 ### À deploy-qualif (déploiement)
 ```
 Titre : Deploy qualif [Phase N]
-Environnement : 192.168.1.217
+Environnement : 192.168.1.218
 Rapport attendu : statut services, URL accessible oui/non, erreurs détaillées si ÉCHEC
 ```
 

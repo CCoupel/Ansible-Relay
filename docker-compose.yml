@@ -1,0 +1,43 @@
+# docker-compose.yml — AnsibleRelay qualification
+# Phase 1 : test relay-agent seul (sans relay-server complet)
+#
+# Déploiement via Docker remote access :
+#   DOCKER_HOST=tcp://192.168.1.217:2375 docker compose up --build --abort-on-container-exit
+#
+# Le code est inclus via build context (COPY dans Dockerfiles).
+# Pas de bind-mount — compatible avec daemon Linux distant depuis Windows.
+#
+# Services Phase 1 :
+#   mock-server        : répond HTTP aux tentatives enrollment
+#   relay-agent-test   : script de qualification Phase 1
+#
+# Phase 2 (tâche #30 — dev-relay) : relay-api, nats, caddy
+
+services:
+
+  # ── Phase 1 : mock server pour enrollment ─────────────────────────────────
+  mock-server:
+    build:
+      context: ./qualif
+      dockerfile: Dockerfile.mock
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 3s
+
+  # ── Phase 1 : qualification relay-agent ───────────────────────────────────
+  relay-agent-test:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile.qualify
+    depends_on:
+      mock-server:
+        condition: service_healthy
+    environment:
+      PYTHONUNBUFFERED: "1"
+      RELAY_SERVER_URL: "http://mock-server:8080"
+
+volumes: {}

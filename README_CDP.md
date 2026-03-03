@@ -86,7 +86,7 @@ Ansible_Agent/
 - **test-writer** : Tests unitaires + E2E
 - **qa** : Exécute pytest, valide
 - **security-reviewer** : Audit sécurité avant validation
-- **deploy-qualif** : Docker Compose → 192.168.1.217
+- **deploy-qualif** : Docker Compose → 192.168.1.218
 - **deploy-prod** : Kubernetes via Helm → production
 
 ---
@@ -101,7 +101,7 @@ Pour chaque tâche, dans l'ordre des dépendances :
 3. test-writer écrit tests unitaires
 4. qa lance pytest → valide 0 fail
 5. security-reviewer audit → 0 CRITIQUE/HAUT
-6. deploy-qualif déploie sur 192.168.1.217
+6. deploy-qualif déploie sur 192.168.1.218
 7. Répéter pour tâche suivante
 
 **Condition passage Phase 1 → 2** :

@@ -34,7 +34,7 @@ Status : Phase 0 complète, Phase 1 en attente de confirmation utilisateur
 | #19 | Tests unitaires relay-agent Phase 1 | test-writer | pending | #4, #6, #8, #9, #11, #13, #14, #15, #17 |
 | #20 | QA — pytest Phase 1, rapport (nb tests, pass, fail, détails) | qa | pending | #19 |
 | #22 | Security review — audit Phase 1 relay-agent | security-reviewer | pending | #20 |
-| #23 | Deploy qualif Phase 1 — relay-agent sur 192.168.1.217 | deploy-qualif | pending | #22 |
+| #23 | Deploy qualif Phase 1 — relay-agent sur 192.168.1.218 | deploy-qualif | pending | #22 |
 
 **Validation Phase 1 → Phase 2** :
 - ✓ TOUTES tâches #4-#23 completed
@@ -66,7 +66,7 @@ Status : Phase 0 complète, Phase 1 en attente de confirmation utilisateur
 | #31 | Tests unitaires relay-server Phase 2 | test-writer | pending | #24-#30 |
 | #32 | QA — pytest Phase 2, rapport | qa | pending | #31 |
 | #33 | Security review — audit Phase 2 relay-server | security-reviewer | pending | #32 |
-| #34 | Deploy qualif Phase 2 — relay-server complet sur 192.168.1.217 | deploy-qualif | pending | #33, #23 |
+| #34 | Deploy qualif Phase 2 — relay-server complet sur 192.168.1.218 | deploy-qualif | pending | #33, #23 |
 
 **Validation Phase 2 → Phase 3** :
 - ✓ TOUTES tâches #24-#34 completed
@@ -93,7 +93,7 @@ Status : Phase 0 complète, Phase 1 en attente de confirmation utilisateur
 | #37 | Tests unitaires + E2E plugins Phase 3 | test-writer | pending | #35, #36 |
 | #38 | QA — pytest Phase 3 (unitaire + E2E), rapport | qa | pending | #37 |
 | #39 | Security review global — audit Phase 3 + revue MVP complète | security-reviewer | pending | #38 |
-| #40 | Deploy qualif Phase 3 — test E2E complet sur 192.168.1.217 | deploy-qualif | pending | #39 |
+| #40 | Deploy qualif Phase 3 — test E2E complet sur 192.168.1.218 | deploy-qualif | pending | #39 |
 | #41 | Deploy prod — Helm chart Kubernetes (après confirmation utilisateur) | deploy-prod | pending | #40 |
 
 **Validation Phase 3 → Prod** :
