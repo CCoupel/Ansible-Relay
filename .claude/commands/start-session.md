@@ -141,7 +141,7 @@ Références projet :
 Envoie un message au `cdp` via `SendMessage` (type: "message") avec le contenu suivant :
 
 ```
-Bonjour. La team AnsibleRelay est constituée. Voici tes teammates :
+Bonjour. La team AnsibleRelay est constituée et prête. Voici tes teammates :
 - planner : architecte, définit les tâches
 - dev-agent : développe le relay-agent (client Python + asyncio)
 - dev-relay : développe le serveur relay (FastAPI + NATS JetStream)
@@ -152,9 +152,10 @@ Bonjour. La team AnsibleRelay est constituée. Voici tes teammates :
 
 Les spécifications techniques complètes sont dans ARCHITECTURE.md.
 
-Première action : demande au planner de lire ARCHITECTURE.md et de créer le backlog initial de tâches dans TaskList, en suivant l'ordre d'implémentation MVP défini dans la section 17 (Roadmap). Priorise : relay-agent → serveur relay → plugins Ansible. Coordonne ensuite l'équipe selon les priorités.
+N'engage aucune action pour l'instant. Attends les instructions du leader (l'utilisateur) avant de déléguer quoi que ce soit à l'équipe. Réponds simplement que tu es prêt.
 ```
 
 ### Étape 4 — Confirmer à l'utilisateur
 
 Affiche un résumé de la team créée avec la liste des membres et leurs rôles.
+Indique que le cdp est en attente de tes ordres et qu'aucune action n'a été engagée.
