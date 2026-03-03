@@ -1,7 +1,8 @@
-# AnsibleRelay — Spécifications Techniques v1.0
+# AnsibleRelay — Spécifications Techniques v1.1
 
 > Document issu de la session de brainstorming architecture.
 > Décrit les décisions validées pour le MVP et les axes v2.
+> v1.1 : ajout déploiement systemd/Docker Compose/Kubernetes, persistance des données.
 
 ---
 
@@ -24,6 +25,9 @@
 15. [Haute disponibilité et scalabilité](#15-haute-disponibilité-et-scalabilité)
 16. [Configuration](#16-configuration)
 17. [Roadmap MVP vs V2](#17-roadmap-mvp-vs-v2)
+18. [Déploiement — relay-agent (systemd)](#18-déploiement--relay-agent-systemd)
+19. [Déploiement — relay server (Compose / Kubernetes)](#19-déploiement--relay-server-compose--kubernetes)
+20. [Persistance des données](#20-persistance-des-données)
 
 ---
 
@@ -515,16 +519,18 @@ Un token `role: plugin` ne peut pas ouvrir de WebSocket agent.
 ### Flow d'enrollment
 
 ```
-Prérequis : clef publique de l'agent déposée manuellement
-            dans server/authorized_keys/{hostname}.pub
+Prérequis : clef publique de l'agent pré-enregistrée en base
+            via POST /api/admin/authorize (pipeline de provisioning)
+
+Table DB : authorized_keys(hostname, public_key_pem, approved_at, approved_by)
 
 1. Agent démarre
-   → génère paire RSA-4096 si absente (~/.ansible-relay/id_rsa)
+   → génère paire RSA-4096 si absente (/etc/ansible-relay/id_rsa)
    → POST https://relay-server/api/register
      { hostname: "host-A", public_key_pem: "..." }
 
 2. Relay server
-   → vérifie public_key dans authorized_keys/host-A.pub
+   → vérifie public_key dans la table authorized_keys (DB)
    → génère JWT : { sub: "host-A", role: "agent",
                     jti: "uuid", iat: now, exp: now+3600 }
    → chiffre JWT avec la clef publique du client (RSAES-OAEP)
@@ -533,9 +539,28 @@ Prérequis : clef publique de l'agent déposée manuellement
 
 3. Agent
    → déchiffre token_encrypted avec sa clef privée → JWT
-   → stocke JWT localement (~/.ansible-relay/token.jwt)
-   → stocke server_public_key (~/.ansible-relay/server.pub)
+   → stocke JWT localement (/etc/ansible-relay/token.jwt)
+   → stocke server_public_key (/etc/ansible-relay/server.pub)
 ```
+
+### Endpoint d'autorisation (pipeline de provisioning)
+
+```
+POST /api/admin/authorize
+Authorization: Bearer <admin_token>
+
+{
+  "hostname": "host-A",
+  "public_key_pem": "-----BEGIN PUBLIC KEY-----\n...",
+  "approved_by": "terraform-pipeline"
+}
+
+→ INSERT INTO authorized_keys (hostname, public_key_pem, approved_at, approved_by)
+→ HTTP 201 Created
+```
+
+Cet endpoint est distinct de `/api/register` et nécessite un token admin (rôle `admin`).
+Il est appelé par le pipeline de provisioning (Terraform, Packer, cloud-init) **avant** que le serveur ne démarre.
 
 ### Flow de reconnexion
 
@@ -1020,8 +1045,8 @@ Tâche en transit au moment du restart Node #1 :
 
 ### Base de données
 
-SQLite pour le MVP (mono-node).
-PostgreSQL pour la production multi-nodes (table `agents` partagée).
+SQLite pour le MVP (mono-node, Docker Compose).
+PostgreSQL pour la production multi-nodes (Kubernetes). Voir section 20.
 
 ---
 
@@ -1055,7 +1080,6 @@ host = 0.0.0.0
 port = 8443
 tls_cert = /etc/ansible-relay/server.crt
 tls_key = /etc/ansible-relay/server.key
-authorized_keys_dir = /etc/ansible-relay/authorized_keys/
 
 [nats]
 url = nats://nats-cluster:4222
@@ -1064,12 +1088,15 @@ stream_results = RELAY_RESULTS
 message_ttl = 300
 
 [database]
-url = sqlite:///var/lib/ansible-relay/relay.db
-# Production : postgresql://user:pass@host/relay
+# Compose / MVP : SQLite
+url = sqlite:////data/relay.db
+# Production Kubernetes : PostgreSQL
+# url = postgresql://relay:pass@postgres:5432/relay
 
 [jwt]
 secret_key = <clef secrète HMAC-SHA256>
 token_ttl = 3600
+admin_token = <token admin pour /api/admin/authorize>
 ```
 
 ### Plugin Ansible (`ansible.cfg`)
@@ -1106,12 +1133,16 @@ only_connected = false
 | relay-agent : tâches async (registre fichier) | MVP |
 | relay-agent : max_concurrent_tasks | MVP |
 | relay-agent : reconnexion avec backoff expo | MVP |
+| relay-agent : systemd unit file | MVP |
 | relay server : FastAPI + WebSocket handler | MVP |
 | relay server : NATS JetStream (RELAY_TASKS + RELAY_RESULTS) | MVP |
 | relay server : REST API exec/upload/fetch | MVP |
-| relay server : JWT auth (rôles agent/plugin) | MVP |
+| relay server : JWT auth (rôles agent/plugin/admin) | MVP |
 | relay server : enrollment + blacklist révocation | MVP |
+| relay server : authorized_keys en DB (table) | MVP |
+| relay server : endpoint admin /api/admin/authorize | MVP |
 | relay server : SQLite | MVP |
+| relay server : Docker Compose (API + NATS + Caddy) | MVP |
 | connection plugin : exec_command + put_file + fetch_file | MVP |
 | connection plugin : pipelining | MVP |
 | inventory plugin : tous agents + only_connected | MVP |
@@ -1123,7 +1154,8 @@ only_connected = false
 |---|---|
 | Chunking fichiers > 1MB | Haute |
 | Stdout streaming (HTTP chunked) | Haute |
-| PostgreSQL (multi-nodes) | Haute |
+| PostgreSQL + déploiement Kubernetes | Haute |
+| NATS StatefulSet K8s + PVC | Haute |
 | mTLS (certificats client) | Moyenne |
 | Token rotation automatique (SPIFFE-style) | Moyenne |
 | Groupes et tags dynamiques dans l'inventaire | Moyenne |
@@ -1133,4 +1165,328 @@ only_connected = false
 
 ---
 
+## 18. Déploiement — relay-agent (systemd)
+
+### Philosophie : infrastructure immuable
+
+Les hôtes gérés sont provisionnés neufs (cattle, pas pets).
+L'agent fait partie du **golden image** — il est présent et actif dès le premier boot.
+
+```
+Pipeline de provisioning (Terraform / Packer / cloud-init)
+─────────────────────────────────────────────────────────────────
+Étape 1 : génère paire RSA-4096 pour le nouveau serveur
+Étape 2 : stocke la clef privée dans le secret manager (Vault / AWS SSM)
+Étape 3 : appelle POST /api/admin/authorize sur le relay server
+           → enregistre la clef publique en DB avant le boot
+Étape 4 : provisionne le serveur avec la clef privée injectée
+           (cloud-init / user-data)
+Étape 5 : au premier boot, l'agent démarre et s'enrôle automatiquement
+```
+
+### Unit file systemd
+
+```ini
+# /etc/systemd/system/relay-agent.service
+
+[Unit]
+Description=AnsibleRelay Agent
+Documentation=https://github.com/org/ansible-relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=relay-agent
+Group=relay-agent
+ExecStart=/usr/bin/python3 /opt/relay-agent/relay_agent.py \
+    --config /etc/ansible-relay/agent.conf
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+# Sécurité
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/ansible-relay /var/log/ansible-relay
+
+# Logs
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=relay-agent
+
+# Variables d'environnement
+EnvironmentFile=-/etc/ansible-relay/agent.env
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Structure fichiers sur l'hôte
+
+```
+/opt/relay-agent/
+  relay_agent.py          # daemon principal
+  async_registry.py       # registre jobs async
+  facts_collector.py      # collecte facts
+
+/etc/ansible-relay/
+  agent.conf              # configuration
+  id_rsa                  # clef privée (mode 600, owner relay-agent)
+  token.jwt               # JWT courant (renouvelé automatiquement)
+  server.pub              # clef publique du relay server
+
+/var/lib/ansible-relay/
+  async/                  # registres JSON des jobs async
+
+/var/log/ansible-relay/
+  agent.log               # logs applicatifs (si pas journald)
+```
+
+### Activation
+
+```bash
+# Installation
+systemctl daemon-reload
+systemctl enable relay-agent
+systemctl start relay-agent
+
+# Vérification
+systemctl status relay-agent
+journalctl -u relay-agent -f
+```
+
+---
+
+## 19. Déploiement — relay server (Compose / Kubernetes)
+
+### Docker Compose — tests et qualification
+
+Cible : environnement mono-host, tests, CI, démonstration.
+
+```yaml
+# docker-compose.yml
+
+services:
+
+  nats:
+    image: nats:2-alpine
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    volumes:
+      - nats_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  relay-api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      NATS_URL: nats://nats:4222
+      DATABASE_URL: sqlite:////data/relay.db
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      TLS_CERT: /etc/relay/certs/server.crt
+      TLS_KEY: /etc/relay/certs/server.key
+    volumes:
+      - relay_data:/data
+      - ./certs:/etc/relay/certs:ro
+    expose:
+      - "8443"
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - relay-api
+
+volumes:
+  nats_data:
+  relay_data:
+  caddy_data:
+```
+
+```
+# Caddyfile
+relay.example.com {
+    reverse_proxy relay-api:8443 {
+        transport http {
+            tls
+            tls_insecure_skip_verify  # TLS interne auto-signé
+        }
+    }
+}
+```
+
+```
+# .env (ne pas committer)
+JWT_SECRET_KEY=<secret HMAC-SHA256>
+ADMIN_TOKEN=<token admin>
+```
+
+### Kubernetes — production
+
+Cible : infrastructure > 100 agents, haute disponibilité, multi-nodes.
+
+#### Schéma des ressources K8s
+
+```
+Namespace: ansible-relay
+─────────────────────────────────────────────────────────────────
+
+Deployment: relay-api
+  replicas: 3
+  image: registry/ansible-relay-api:tag
+  envFrom:
+    - secretRef: relay-secrets          # JWT_SECRET_KEY, ADMIN_TOKEN, DB_URL
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+
+StatefulSet: nats
+  replicas: 3
+  image: nats:2-alpine
+  command: ["-js", "-sd", "/data", "--cluster", "--cluster_name", "relay"]
+  volumeClaimTemplates:
+    - name: nats-data
+      storageClassName: fast-ssd
+      accessModes: [ReadWriteOnce]
+      size: 20Gi
+
+Service: relay-api-svc       (ClusterIP → port 8443)
+Service: nats-svc            (ClusterIP → port 4222)
+Service: nats-cluster-svc    (ClusterIP → port 6222, inter-nats)
+
+Ingress: relay-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"  # WS longues
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  tls:
+    - secretName: relay-tls
+      hosts: [relay.example.com]
+  rules:
+    - host: relay.example.com
+      http:
+        paths:
+          - path: /
+            backend: relay-api-svc:8443
+
+Secret: relay-secrets
+  JWT_SECRET_KEY: <base64>
+  ADMIN_TOKEN: <base64>
+  DATABASE_URL: <base64>  # postgresql://...
+
+ExternalService: postgresql
+  (RDS / CloudSQL / CrunchyData PGO)
+  Base: relay
+  Tables: agents, blacklist, authorized_keys
+```
+
+#### WebSocket et ingress
+
+Les connexions WebSocket agents sont **longues durées** (heures/jours).
+L'ingress nginx doit être configuré pour les supporter :
+
+```yaml
+annotations:
+  nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+  nginx.ingress.kubernetes.io/configuration-snippet: |
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+```
+
+---
+
+## 20. Persistance des données
+
+### Inventaire complet des données
+
+| Donnée | Nature | Sensible | Mutable | Stockage Compose | Stockage K8s |
+|---|---|---|---|---|---|
+| Agent registry | DB relationnelle | Non | Fréquent | SQLite (volume) | PostgreSQL externe |
+| Token blacklist | DB relationnelle | Non | Fréquent | SQLite (volume) | PostgreSQL externe |
+| authorized_keys | Table DB | Oui | Fréquent | SQLite (volume) | PostgreSQL externe |
+| JWT signing secret | Secret | Oui | Rare | `.env` / bind mount | Secret K8s |
+| Admin token | Secret | Oui | Rare | `.env` / bind mount | Secret K8s |
+| TLS cert/key serveur | Secret | Oui | Rare (renouvellement) | bind mount `./certs` | cert-manager |
+| NATS JetStream state | Binaire NATS | Non | Continu | Volume nommé | PVC StatefulSet |
+| Async jobs (agent) | Fichier JSON | Non | Par tâche | `/var/lib/ansible-relay/` (hôte) | `/var/lib/ansible-relay/` (hôte) |
+
+### Schéma de base de données
+
+```sql
+-- Table principale des agents
+CREATE TABLE agents (
+    hostname        TEXT PRIMARY KEY,
+    public_key_pem  TEXT NOT NULL,
+    token_jti       TEXT,           -- JTI du token actif
+    enrolled_at     TIMESTAMP,
+    last_seen       TIMESTAMP,
+    status          TEXT DEFAULT 'disconnected'  -- connected | disconnected
+);
+
+-- Clefs autorisées pour l'enrollment
+CREATE TABLE authorized_keys (
+    hostname        TEXT PRIMARY KEY,
+    public_key_pem  TEXT NOT NULL,
+    approved_at     TIMESTAMP NOT NULL,
+    approved_by     TEXT NOT NULL    -- "terraform-pipeline", "admin", etc.
+);
+
+-- Tokens révoqués
+CREATE TABLE blacklist (
+    jti             TEXT PRIMARY KEY,
+    hostname        TEXT NOT NULL,
+    revoked_at      TIMESTAMP NOT NULL,
+    reason          TEXT,
+    expires_at      TIMESTAMP NOT NULL  -- nettoyage auto des entrées expirées
+);
+```
+
+### Gestion des authorized_keys dynamiques
+
+Les nouvelles clefs sont enregistrées **avant** le boot du serveur via l'API admin.
+Le relay server vérifie la table `authorized_keys` à chaque enrollment.
+
+```
+Pipeline de provisioning
+  → POST /api/admin/authorize { hostname, public_key_pem, approved_by }
+  → INSERT INTO authorized_keys
+
+Serveur boot → agent démarre → POST /api/register
+  → relay server : SELECT FROM authorized_keys WHERE hostname = ?
+  → clef trouvée et correspondante → enrollment accepté ✓
+  → clef absente ou non correspondante → HTTP 403 ✗
+```
+
+### Backup et reprise
+
+| Environnement | Stratégie backup |
+|---|---|
+| Compose (qualif) | `docker cp` du volume SQLite, snapshot VM |
+| K8s (prod) | pg_dump PostgreSQL via CronJob, snapshots PVC NATS |
+
+En cas de perte complète du relay server :
+- Les agents reconnectent dès que le serveur est de retour (backoff expo)
+- Si la DB est perdue : les agents doivent se ré-enrôler (token blacklist perdue = reset)
+- Les tâches NATS en transit (< 5min) sont perdues si les PVC NATS sont perdus — Ansible retourne FAILED, l'opérateur relance le playbook
+
+---
+
 *Document généré le 2026-03-03 — Session de brainstorming architecture AnsibleRelay*
+*Mise à jour v1.1 : déploiement systemd / Docker Compose / Kubernetes, persistance des données*
