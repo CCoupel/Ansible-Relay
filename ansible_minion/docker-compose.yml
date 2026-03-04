@@ -1,13 +1,13 @@
-# docker-compose.clients.yml — AnsibleRelay Test Clients (Phase 1)
+# docker-compose.yml — AnsibleRelay Test Minions (Phase 1)
 #
 # Agents de test connectés au serveur relay distant (192.168.1.218:7770)
-# Déployer APRÈS le serveur (docker-compose.yml)
+# Déployer APRÈS le serveur (../ansible_server/docker-compose.yml)
 #
 # Les agents accèdent au serveur via l'IP/port 192.168.1.218:7770
-# (port exposé par docker-compose.yml sur le host)
+# (port exposé par ansible_server/docker-compose.yml sur le host)
 #
 # Déploiement via Docker remote access :
-#   DOCKER_HOST=tcp://192.168.1.218:2375 docker compose -f docker-compose.clients.yml up --build -d
+#   cd ansible_minion && DOCKER_HOST=tcp://192.168.1.218:2375 docker compose up --build -d
 #
 # Pour vérifier l'enrollment :
 #   DOCKER_HOST=tcp://192.168.1.218:2375 docker logs relay-agent-01
@@ -20,7 +20,7 @@ services:
   # ── relay-agent-01 : client #1 (qualif-host-01) ───────────────────────────
   relay-agent-01:
     build:
-      context: ./agent
+      context: ../agent
       dockerfile: Dockerfile.agent
     container_name: relay-agent-01
     restart: unless-stopped
@@ -36,7 +36,7 @@ services:
   # ── relay-agent-02 : client #2 (qualif-host-02) ───────────────────────────
   relay-agent-02:
     build:
-      context: ./agent
+      context: ../agent
       dockerfile: Dockerfile.agent
     container_name: relay-agent-02
     restart: unless-stopped
@@ -52,7 +52,7 @@ services:
   # ── relay-agent-03 : client #3 (qualif-host-03) ───────────────────────────
   relay-agent-03:
     build:
-      context: ./agent
+      context: ../agent
       dockerfile: Dockerfile.agent
     container_name: relay-agent-03
     restart: unless-stopped

@@ -34,7 +34,7 @@ services:
   # ── relay-api (FastAPI multi-port) — 3 ports distincts pour sécurité ────────
   relay-api:
     build:
-      context: .
+      context: ..
       dockerfile: server/Dockerfile
     container_name: relay-api
     restart: unless-stopped
@@ -69,7 +69,7 @@ services:
   # ── Caddy (reverse proxy + TLS) — optionnel pour production ──────────────────
   caddy:
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile.caddy
     container_name: relay-caddy
     restart: unless-stopped
