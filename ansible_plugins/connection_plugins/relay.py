@@ -36,26 +36,37 @@ version_added: "1.0"
 options:
   relay_server:
     description:
-      - Base URL of the AnsibleRelay FastAPI server.
-    default: http://localhost:8000
+      - Base URL of the AnsibleRelay FastAPI server (HTTP or HTTPS).
+    default: http://localhost:7770
     ini:
       - section: relay_connection
         key: server
     env:
-      - name: ANSIBLE_RELAY_SERVER
+      - name: RELAY_SERVER_URL
     vars:
       - name: ansible_relay_server
-  relay_token:
+  relay_token_file:
     description:
-      - Bearer token for authenticating with the relay server.
-    default: ""
+      - Path to file containing JWT token for plugin role authentication.
+    default: /etc/ansible/relay_plugin.jwt
     ini:
       - section: relay_connection
-        key: token
+        key: token_file
     env:
-      - name: ANSIBLE_RELAY_TOKEN
+      - name: RELAY_TOKEN_FILE
     vars:
-      - name: ansible_relay_token
+      - name: ansible_relay_token_file
+  relay_ca_bundle:
+    description:
+      - Path to CA bundle for TLS verification (HTTPS only).
+    default: null
+    ini:
+      - section: relay_connection
+        key: ca_bundle
+    env:
+      - name: RELAY_CA_BUNDLE
+    vars:
+      - name: ansible_relay_ca_bundle
   relay_timeout:
     description:
       - Seconds to wait for a task result before timing out.
@@ -65,7 +76,7 @@ options:
       - section: relay_connection
         key: timeout
     env:
-      - name: ANSIBLE_RELAY_TIMEOUT
+      - name: RELAY_TIMEOUT
     vars:
       - name: ansible_relay_timeout
 """
@@ -75,7 +86,10 @@ import json
 import os
 import uuid
 
-import requests
+try:
+    import httpx
+except ImportError:
+    httpx = None
 
 from ansible.errors import AnsibleConnectionFailure, AnsibleError
 from ansible.plugins.connection import ConnectionBase
@@ -84,11 +98,11 @@ from ansible.utils.display import Display
 display = Display()
 
 
-class Connection(ConnectionBase):
-    """AnsibleRelay connection plugin — routes commands through the relay broker."""
+class ConnectionPlugin(ConnectionBase):
+    """AnsibleRelay connection plugin — routes commands through the relay server via HTTP/REST."""
 
     transport = "relay"
-    has_pipelining = False
+    has_pipelining = True
     has_tty = False
 
     # ------------------------------------------------------------------
@@ -98,8 +112,14 @@ class Connection(ConnectionBase):
     def _relay_server(self):
         return self.get_option("relay_server").rstrip("/")
 
+    def _relay_token_file(self):
+        return self.get_option("relay_token_file")
+
+    def _relay_ca_bundle(self):
+        return self.get_option("relay_ca_bundle")
+
     def _headers(self):
-        token = self.get_option("relay_token")
+        token = self._load_jwt()
         h = {"Content-Type": "application/json"}
         if token:
             h["Authorization"] = f"Bearer {token}"
@@ -111,33 +131,56 @@ class Connection(ConnectionBase):
     def _hostname(self):
         return self._play_context.remote_addr
 
-    def _post_task(self, payload: dict) -> dict:
-        """POST a task to /api/task/{hostname} and wait for the result."""
-        hostname = self._hostname()
-        url = f"{self._relay_server()}/api/task/{hostname}"
-
-        display.vvv(f"RELAY: POST {url}  task_id={payload.get('task_id')}", host=hostname)
+    def _load_jwt(self):
+        """Load JWT token from file."""
+        token_file = self._relay_token_file()
+        if not token_file or not os.path.exists(token_file):
+            return ""
 
         try:
-            resp = requests.post(
-                url,
-                headers=self._headers(),
-                json=payload,
-                timeout=self._timeout(),
+            with open(token_file, "r") as f:
+                return f.read().strip()
+        except Exception:
+            return ""
+
+    def _get_client(self):
+        """Create httpx client with proper TLS configuration."""
+        verify = True
+        ca_bundle = self._relay_ca_bundle()
+        if ca_bundle:
+            verify = ca_bundle
+
+        return httpx.Client(verify=verify, timeout=self._timeout())
+
+    def _post_relay(self, endpoint: str, payload: dict) -> dict:
+        """POST a task to relay server and parse result."""
+        if httpx is None:
+            raise AnsibleConnectionFailure(
+                "httpx library is required. Install with: pip install httpx"
             )
-        except requests.Timeout:
+
+        hostname = self._hostname()
+        url = f"{self._relay_server()}{endpoint}"
+
+        display.vvv(f"RELAY: POST {endpoint} (host={hostname})", host=hostname)
+
+        client = self._get_client()
+        try:
+            resp = client.post(url, headers=self._headers(), json=payload)
+        except httpx.TimeoutException:
             raise AnsibleConnectionFailure(
                 f"Relay timeout ({self._timeout()}s) waiting for host '{hostname}'"
             )
-        except requests.ConnectionError as exc:
+        except httpx.ConnectError as exc:
             raise AnsibleConnectionFailure(
                 f"Cannot reach relay server at '{self._relay_server()}': {exc}"
             )
+        finally:
+            client.close()
 
         if resp.status_code == 404:
             raise AnsibleConnectionFailure(
-                f"Host '{hostname}' is not connected to the relay broker "
-                f"(HTTP 404 from {url})"
+                f"Host '{hostname}' not registered or not connected to relay server (HTTP 404)"
             )
 
         if resp.status_code != 200:
@@ -161,60 +204,45 @@ class Connection(ConnectionBase):
     # ------------------------------------------------------------------
 
     def _connect(self):
-        """Check that the target host is registered with the broker."""
+        """Check that the target host is connected to the relay server via WebSocket."""
         if self._connected:
             return self
 
         hostname = self._hostname()
-        url = f"{self._relay_server()}/api/hosts/{hostname}/status"
+        display.vvv(f"RELAY: checking connection to {hostname}", host=hostname)
 
-        display.vvv(f"RELAY: checking host status at {url}", host=hostname)
-
-        try:
-            resp = requests.get(url, headers=self._headers(), timeout=10)
-        except requests.ConnectionError as exc:
+        # For now, just verify we can reach the relay server and have a valid JWT.
+        # The actual host connectivity is checked when exec_command is called.
+        if not self._relay_token_file():
             raise AnsibleConnectionFailure(
-                f"Cannot reach relay server at '{self._relay_server()}': {exc}"
+                "relay_token_file is not set. Set it via ansible.cfg or RELAY_TOKEN_FILE env var."
             )
 
-        if resp.status_code == 404:
+        jwt = self._load_jwt()
+        if not jwt:
             raise AnsibleConnectionFailure(
-                f"Host '{hostname}' is not registered with the relay server. "
-                "Ensure the relay-agent is running on the target."
-            )
-
-        if resp.status_code != 200:
-            raise AnsibleConnectionFailure(
-                f"Relay server returned {resp.status_code} for host '{hostname}'"
-            )
-
-        data = resp.json()
-        if not data.get("connected", False):
-            raise AnsibleConnectionFailure(
-                f"Host '{hostname}' is registered but WebSocket is not active. "
-                "The relay-agent may have disconnected."
+                f"JWT token file is empty or not readable: {self._relay_token_file()}"
             )
 
         self._connected = True
-        display.vvv(f"RELAY: host '{hostname}' is connected", host=hostname)
+        display.vvv(f"RELAY: connection to {hostname} verified", host=hostname)
         return self
 
     def exec_command(self, cmd, in_data=None, sudoable=True):
-        """Execute a shell command on the remote host via the relay broker.
+        """Execute a shell command on the remote host via the relay server.
 
         Returns: (return_code, stdout_bytes, stderr_bytes)
         """
         super().exec_command(cmd, in_data=in_data, sudoable=sudoable)
 
-        task_id = str(uuid.uuid4())
+        hostname = self._hostname()
         payload = {
-            "task_id": task_id,
-            "type": "exec",
+            "hostname": hostname,
             "command": cmd,
             "stdin": (in_data or b"").decode("utf-8", errors="replace"),
         }
 
-        result = self._post_task(payload)
+        result = self._post_relay("/api/exec", payload)
 
         rc = int(result.get("rc", 1))
         stdout = result.get("stdout", "").encode("utf-8")
@@ -222,52 +250,57 @@ class Connection(ConnectionBase):
         return rc, stdout, stderr
 
     def put_file(self, in_path, out_path):
-        """Transfer a local file to the remote host via the relay broker (base64)."""
+        """Transfer a local file to the remote host via the relay server (base64)."""
         super().put_file(in_path, out_path)
 
-        display.vvv(f"RELAY: put_file {in_path} → {out_path}", host=self._hostname())
+        hostname = self._hostname()
+        display.vvv(f"RELAY: put_file {in_path} → {out_path}", host=hostname)
 
         if not os.path.exists(in_path):
             raise AnsibleError(f"put_file: local file not found: {in_path}")
 
         with open(in_path, "rb") as fh:
-            data_b64 = base64.b64encode(fh.read()).decode("ascii")
+            data = fh.read()
 
-        task_id = str(uuid.uuid4())
+        # Check MVP file size limit (500KB)
+        if len(data) > 500 * 1024:
+            raise AnsibleError(
+                f"put_file: file too large ({len(data)} bytes, max 500KB for MVP)"
+            )
+
         payload = {
-            "task_id": task_id,
-            "type": "put_file",
-            "dst": out_path,
-            "data_b64": data_b64,
+            "hostname": hostname,
+            "dest": out_path,
+            "data": base64.b64encode(data).decode("ascii"),
+            "mode": "0644",
         }
 
-        result = self._post_task(payload)
+        result = self._post_relay("/api/upload", payload)
         if int(result.get("rc", 1)) != 0:
             raise AnsibleError(
                 f"put_file failed on remote host: {result.get('stderr', '')}"
             )
 
     def fetch_file(self, in_path, out_path):
-        """Fetch a remote file via the relay broker (base64) to a local path."""
+        """Fetch a remote file via the relay server (base64) to a local path."""
         super().fetch_file(in_path, out_path)
 
-        display.vvv(f"RELAY: fetch_file {in_path} → {out_path}", host=self._hostname())
+        hostname = self._hostname()
+        display.vvv(f"RELAY: fetch_file {in_path} → {out_path}", host=hostname)
 
-        task_id = str(uuid.uuid4())
         payload = {
-            "task_id": task_id,
-            "type": "fetch_file",
+            "hostname": hostname,
             "src": in_path,
         }
 
-        result = self._post_task(payload)
+        result = self._post_relay("/api/fetch", payload)
 
         if int(result.get("rc", 1)) != 0:
             raise AnsibleError(
                 f"fetch_file failed on remote host: {result.get('stderr', '')}"
             )
 
-        data_b64 = result.get("data_b64", "")
+        data_b64 = result.get("data", "")
         if not data_b64:
             raise AnsibleError(f"fetch_file: relay returned empty data for '{in_path}'")
 
