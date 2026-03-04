@@ -92,12 +92,12 @@ services:
   # PHASE 1 — relay-agent connecté au relay-api Phase 2
   # ─────────────────────────────────────────────────────────────────────────────
 
-  # ── relay-agent : daemon persistent (se connecte au relay-api Phase 2) ───────
-  relay-agent:
+  # ── relay-agent-01 : client #1 (qualif-host-01) ───────────────────────────
+  relay-agent-01:
     build:
       context: ./agent
       dockerfile: Dockerfile.agent
-    container_name: relay-agent
+    container_name: relay-agent-01
     restart: unless-stopped
     depends_on:
       relay-api:
@@ -108,7 +108,43 @@ services:
       RELAY_HOSTNAME: "qualif-host-01"
       RELAY_DATA_DIR: "/var/lib/relay-agent"
     volumes:
-      - relay_agent_data:/var/lib/relay-agent
+      - relay_agent_01_data:/var/lib/relay-agent
+
+  # ── relay-agent-02 : client #2 (qualif-host-02) ───────────────────────────
+  relay-agent-02:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile.agent
+    container_name: relay-agent-02
+    restart: unless-stopped
+    depends_on:
+      relay-api:
+        condition: service_healthy
+    environment:
+      PYTHONUNBUFFERED: "1"
+      RELAY_SERVER_URL: "http://relay-api:7770"
+      RELAY_HOSTNAME: "qualif-host-02"
+      RELAY_DATA_DIR: "/var/lib/relay-agent"
+    volumes:
+      - relay_agent_02_data:/var/lib/relay-agent
+
+  # ── relay-agent-03 : client #3 (qualif-host-03) ───────────────────────────
+  relay-agent-03:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile.agent
+    container_name: relay-agent-03
+    restart: unless-stopped
+    depends_on:
+      relay-api:
+        condition: service_healthy
+    environment:
+      PYTHONUNBUFFERED: "1"
+      RELAY_SERVER_URL: "http://relay-api:7770"
+      RELAY_HOSTNAME: "qualif-host-03"
+      RELAY_DATA_DIR: "/var/lib/relay-agent"
+    volumes:
+      - relay_agent_03_data:/var/lib/relay-agent
 
   # ── smoke-test Phase 2 (one-shot) ─────────────────────────────────────────
   smoke-test:
@@ -157,6 +193,8 @@ services:
 volumes:
   nats_data:
   relay_data:
-  relay_agent_data:
+  relay_agent_01_data:
+  relay_agent_02_data:
+  relay_agent_03_data:
   caddy_data:
   caddy_config:
