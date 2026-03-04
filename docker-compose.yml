@@ -1,12 +1,10 @@
-# docker-compose.yml — AnsibleRelay qualification
+# docker-compose.yml — AnsibleRelay Server (Phase 2)
+#
+# Déploiement du serveur relay uniquement (nats, relay-api, caddy)
+# Utiliser docker-compose.clients.yml pour les agents de test
 #
 # Déploiement via Docker remote access :
 #   DOCKER_HOST=tcp://192.168.1.218:2375 docker compose up --build -d
-#
-# Profils :
-#   (sans profil)   : Phase 2 uniquement — nats, relay-api, caddy
-#   phase1          : Phase 1 — relay-agent daemon + mock-server + relay-agent-test
-#   full            : Phase 1 + Phase 2 (agent connecte au vrai relay-api)
 #
 # Variables d'environnement requises (fichier .env ou export) :
 #   JWT_SECRET_KEY  : clef HMAC-SHA256 pour les JWT
@@ -88,113 +86,8 @@ services:
       RELAY_API_PLUGIN_URL: "relay-api:7771"
       RELAY_API_INVENTORY_URL: "relay-api:7772"
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # PHASE 1 — relay-agent connecté au relay-api Phase 2
-  # ─────────────────────────────────────────────────────────────────────────────
-
-  # ── relay-agent-01 : client #1 (qualif-host-01) ───────────────────────────
-  relay-agent-01:
-    build:
-      context: ./agent
-      dockerfile: Dockerfile.agent
-    container_name: relay-agent-01
-    restart: unless-stopped
-    depends_on:
-      relay-api:
-        condition: service_healthy
-    environment:
-      PYTHONUNBUFFERED: "1"
-      RELAY_SERVER_URL: "http://relay-api:7770"
-      RELAY_HOSTNAME: "qualif-host-01"
-      RELAY_DATA_DIR: "/var/lib/relay-agent"
-    volumes:
-      - relay_agent_01_data:/var/lib/relay-agent
-
-  # ── relay-agent-02 : client #2 (qualif-host-02) ───────────────────────────
-  relay-agent-02:
-    build:
-      context: ./agent
-      dockerfile: Dockerfile.agent
-    container_name: relay-agent-02
-    restart: unless-stopped
-    depends_on:
-      relay-api:
-        condition: service_healthy
-    environment:
-      PYTHONUNBUFFERED: "1"
-      RELAY_SERVER_URL: "http://relay-api:7770"
-      RELAY_HOSTNAME: "qualif-host-02"
-      RELAY_DATA_DIR: "/var/lib/relay-agent"
-    volumes:
-      - relay_agent_02_data:/var/lib/relay-agent
-
-  # ── relay-agent-03 : client #3 (qualif-host-03) ───────────────────────────
-  relay-agent-03:
-    build:
-      context: ./agent
-      dockerfile: Dockerfile.agent
-    container_name: relay-agent-03
-    restart: unless-stopped
-    depends_on:
-      relay-api:
-        condition: service_healthy
-    environment:
-      PYTHONUNBUFFERED: "1"
-      RELAY_SERVER_URL: "http://relay-api:7770"
-      RELAY_HOSTNAME: "qualif-host-03"
-      RELAY_DATA_DIR: "/var/lib/relay-agent"
-    volumes:
-      - relay_agent_03_data:/var/lib/relay-agent
-
-  # ── smoke-test Phase 2 (one-shot) ─────────────────────────────────────────
-  smoke-test:
-    build:
-      context: ./qualif
-      dockerfile: Dockerfile.smoke
-    container_name: relay-smoke-test
-    depends_on:
-      relay-api:
-        condition: service_healthy
-    environment:
-      RELAY_API_URL: "http://relay-api:7770"
-      JWT_SECRET_KEY: "${JWT_SECRET_KEY}"
-      ADMIN_TOKEN: "${ADMIN_TOKEN}"
-      PYTHONUNBUFFERED: "1"
-
-  # ── mock server pour les tests d'enrollment Phase 1 ──────────────────────────
-  mock-server:
-    build:
-      context: ./qualif
-      dockerfile: Dockerfile.mock
-    container_name: relay-mock-server
-    profiles: ["phase1"]
-    healthcheck:
-      test: ["CMD", "python3", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
-      interval: 3s
-      timeout: 2s
-      retries: 10
-      start_period: 3s
-
-  # ── qualification Phase 1 (one-shot, tests fonctionnels) ─────────────────────
-  relay-agent-test:
-    build:
-      context: ./agent
-      dockerfile: Dockerfile.qualify
-    container_name: relay-agent-test
-    profiles: ["phase1"]
-    environment:
-      PYTHONUNBUFFERED: "1"
-      RELAY_SERVER_URL: "http://mock-server:8080"
-    depends_on:
-      mock-server:
-        condition: service_healthy
-
 volumes:
   nats_data:
   relay_data:
-  relay_agent_01_data:
-  relay_agent_02_data:
-  relay_agent_03_data:
   caddy_data:
   caddy_config:
