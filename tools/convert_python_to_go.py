@@ -229,12 +229,12 @@ Examples:
         sys.exit(1)
 
     # Read Python source
-    print(f"📖 Reading: {args.input}")
+    print(f"[*] Reading: {args.input}")
     python_code = read_python_file(args.input)
-    print(f"   Lines: {len(python_code.splitlines())}")
+    print(f"    Lines: {len(python_code.splitlines())}")
 
     # Convert
-    print(f"🔄 Converting to GO...")
+    print(f"[*] Converting to GO...")
     try:
         go_code = convert_to_go(python_code)
     except anthropic.APIError as e:
@@ -245,13 +245,13 @@ Examples:
     write_go_file(args.output, go_code)
 
     # Summary
-    print(f"\n📊 Summary:")
-    print(f"   Input:  {args.input} ({len(python_code)} bytes)")
-    print(f"   Output: {args.output} ({len(go_code)} bytes)")
-    print(f"\n✨ Next steps:")
-    print(f"   1. Review: {args.output}")
-    print(f"   2. Format: goimports -w {args.output}")
-    print(f"   3. Test: go build && go test")
+    print(f"\n[OK] Summary:")
+    print(f"    Input:  {args.input} ({len(python_code)} bytes)")
+    print(f"    Output: {args.output} ({len(go_code)} bytes)")
+    print(f"\n[OK] Next steps:")
+    print(f"    1. Review: {args.output}")
+    print(f"    2. Format: goimports -w {args.output}")
+    print(f"    3. Test: go build && go test")
 
 
 if __name__ == "__main__":
