@@ -11,7 +11,8 @@ Status : Phase 0-3 complètes, Phase 4 (Production Kubernetes) à démarrer
 - **Phase 3 (plugins Ansible)** : 7 tâches (#35 à #41) ✅ COMPLÈTE
 - **Phase 4 (Production Kubernetes)** : 12 tâches (#42 à #53) 🆕 À DÉMARRER
 - **Phase 5 (Documentation & Hardening)** : 8 tâches (#54 à #61) 🆕 À DÉMARRER
-- **Total** : 61 tâches
+- **Phase 6 (Management UI)** : 8 tâches (#62 à #69) 🆕 À DÉMARRER
+- **Total** : 69 tâches
 
 ---
 
@@ -171,6 +172,46 @@ Status : Phase 0-3 complètes, Phase 4 (Production Kubernetes) à démarrer
 
 ---
 
+## PHASE 6 — Management CLI — 8 tâches
+
+### Prérequis
+- Phase 4 déployée en production (K8s avec Helm)
+- Phase 5 complète (hardening + monitoring)
+
+### Objectif
+CLI de management pour administrer les minions (agents) et l'inventaire Ansible :
+- Lister les minions enregistrés et leur état (connecté/déconnecté/expiré)
+- Visualiser métriques minion (dernière activité, facts, version)
+- Revoquer/supprimer un minion
+- Éditer l'inventaire Ansible (ajouter/modifier/supprimer hosts/variables)
+- Visualiser les logs d'activité par minion
+- Pré-autoriser de nouveaux minions (admin endpoint)
+- Configuration multi-serveur (context, profile)
+
+### Tâches Phase 6
+
+| # | Tâche | Owner | Status | Bloquée par |
+|---|-------|-------|--------|------------|
+| #62 | Spécifications CLI — commands, options, output format | dev-plugins | pending | #61 |
+| #63 | Backend API — endpoints management (GET /api/admin/minions, DELETE, PATCH) | dev-relay | pending | #62 |
+| #64 | CLI tool (Python click/typer) — minions, inventory, auth commands | dev-plugins | pending | #62 |
+| #65 | CLI auth — login, token management, context switching | dev-plugins | pending | #63 |
+| #66 | CLI inventory editor — view, edit, validate, diff, rollback | dev-plugins | pending | #64 |
+| #67 | Tests unitaires + E2E CLI commands | test-writer | pending | #64, #65, #66 |
+| #68 | QA — CLI tests, help output, edge cases, security | qa | pending | #67 |
+| #69 | CLI package — pip install, bash completion, man pages, Helm chart | deploy-prod | pending | #68 |
+
+**Validation Phase 6 → Production** :
+- ✓ TOUTES tâches #62-#69 completed
+- ✓ qa : 0 test en échec
+- ✓ CLI opérationnelle : minions list/detail/revoke/delete, inventory edit/diff/rollback
+- ✓ Security : JWT auth, token storage (secure), admin-only commands
+- ✓ Usability : --help, bash completion, clear output formatting
+- ✓ Performance : API response < 500ms, CLI latency < 1s
+- ✓ Confirmation utilisateur
+
+---
+
 ## Dépendances critiques
 
 ```
@@ -198,6 +239,13 @@ PHASE 4 (PRODUCTION K8S):
 PHASE 5 (HARDENING & LIVE):
 #53 (prod déployée) → #54/#55/#56/#57/#58/#59/#60 (en parallèle)
 #54/#55/#56/#57/#58/#59/#60 → #61 (final review & sign-off)
+
+PHASE 6 (MANAGEMENT CLI):
+#61 (sign-off) → #62 (specs)
+#62 → #63 (backend API) + #64 (CLI tool)
+#63 → #65 (auth) bloqué par #63
+#64/#65/#66 (inventory editor) bloqué par #64
+#64/#65/#66 → #67 (tests) → #68 (QA) → #69 (CLI package)
 ```
 
 ---
@@ -226,6 +274,17 @@ PHASE 5 (HARDENING & LIVE):
 - [ ] TLS sur appels REST au serveur
 - [ ] Audit global bout-en-bout
 
+### Phase 6 (Management CLI)
+- [ ] Authentification JWT avec session expiry
+- [ ] Autorisation : admin-only commands (revoke, delete minions)
+- [ ] Token storage : secure (chmod 600, XDG_CONFIG_HOME)
+- [ ] Validation input (inventory YAML, host names, command injection)
+- [ ] Masquage données sensibles (JWT tokens masqués, secrets non loggés)
+- [ ] Audit logs : changements inventaire, revokes, deletes
+- [ ] TLS obligatoire (API calls over HTTPS)
+- [ ] Rate limiting sur API management
+- [ ] Pas de credentials stockées en clair (token refresh obligatoire)
+
 ---
 
 ## Métriques de succès
@@ -238,4 +297,5 @@ PHASE 5 (HARDENING & LIVE):
 | MVP Qualif | E2E : enrollment → playbook exec → résultat sur 192.168.1.218 | ✅ VALIDÉE |
 | Phase 4 | Helm deploy réussie, 3 agents K8s connectés, Ingress TLS OK, persistance vérifiée | 🆕 À FAIRE |
 | Phase 5 | Runbooks testées, monitoring opérationnel, DR validated, sign-off utilisateur | 🆕 À FAIRE |
-| LIVE | Production Kubernetes opérationnelle, SLA garantis, support en place | 🆕 À FAIRE |
+| Phase 6 | CLI opérationnelle : minions list/detail/revoke/delete, inventory edit/diff/rollback | 🆕 À FAIRE |
+| LIVE | Production Kubernetes opérationnelle, SLA garantis, support en place, management CLI | 🆕 À FAIRE |
