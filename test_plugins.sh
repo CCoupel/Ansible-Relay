@@ -1,16 +1,9 @@
 #!/bin/bash
 # Script de test des plugins Ansible (connection + inventory)
-#
-# Pré-conditions:
-# - Server relay sur 192.168.1.218:7770
-# - Agents connectés (qualif-host-01, 02, 03)
-# - Python 3 et ansible installés localement
-# - Ansible playbook dans playbooks/test_relay_plugins.yml
 
 set -e
 
 RELAY_SERVER="192.168.1.218:7770"
-JWT_SECRET_KEY="dev-secret-key-for-qualification-only-change-in-prod"
 TOKEN_FILE="/tmp/relay_token.jwt"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -20,7 +13,8 @@ echo ""
 
 # 1. Generate JWT plugin token
 echo "[*] Step 1: Generating plugin JWT token..."
-python3 << 'PYEOF'
+
+python3 << 'EOF' > "$TOKEN_FILE"
 import json, uuid, base64, hmac, hashlib
 from datetime import datetime, timezone
 
@@ -48,17 +42,17 @@ signature_b64 = base64.urlsafe_b64encode(signature).rstrip(b'=')
 
 token = (header_b64 + b'.' + payload_b64 + b'.' + signature_b64).decode()
 print(token)
-PYEOF > "$TOKEN_FILE"
+EOF
 
-echo "✅ Token saved to $TOKEN_FILE"
+echo "[OK] Token saved to $TOKEN_FILE"
 echo ""
 
 # 2. Verify server is reachable
 echo "[*] Step 2: Verifying relay server connectivity..."
 if curl -s "http://$RELAY_SERVER/health" | grep -q "ok"; then
-    echo "✅ Server is healthy"
+    echo "[OK] Server is healthy"
 else
-    echo "❌ Server is not responding"
+    echo "[ERROR] Server is not responding"
     exit 1
 fi
 echo ""
@@ -68,16 +62,16 @@ echo "[*] Step 3: Testing inventory plugin (GET /api/inventory)..."
 INVENTORY=$(curl -s "http://$RELAY_SERVER/api/inventory" \
   -H "Authorization: Bearer $(cat $TOKEN_FILE)")
 
-echo "📦 Inventory:"
+echo "Inventory:"
 echo "$INVENTORY" | python3 -m json.tool 2>/dev/null || echo "$INVENTORY"
 echo ""
 
 # 4. Check that agents are in inventory
 echo "[*] Step 4: Verifying agents in inventory..."
 if echo "$INVENTORY" | grep -q "qualif-host"; then
-    echo "✅ Agents found in inventory"
+    echo "[OK] Agents found in inventory"
 else
-    echo "❌ No agents found in inventory"
+    echo "[ERROR] No agents found in inventory"
     exit 1
 fi
 echo ""
@@ -93,13 +87,17 @@ export ANSIBLE_CONFIG="./ansible.cfg"
 echo "[*] Command: ansible-playbook playbooks/test_relay_plugins.yml -i relay_inventory -v"
 echo ""
 
-ansible-playbook \
+if ansible-playbook \
   playbooks/test_relay_plugins.yml \
   -i relay_inventory \
   -e "relay_server_url=http://$RELAY_SERVER" \
-  -v
-
-echo ""
-echo "✅ All tests completed successfully!"
-echo ""
-echo "Token file: $TOKEN_FILE (valid for 1 hour)"
+  -v; then
+    echo ""
+    echo "[OK] All tests completed successfully!"
+    echo ""
+    echo "Token file: $TOKEN_FILE (valid for 1 hour)"
+else
+    echo ""
+    echo "[ERROR] Some tests failed"
+    exit 1
+fi
