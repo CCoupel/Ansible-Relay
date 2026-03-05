@@ -57,9 +57,10 @@ else
 fi
 echo ""
 
-# 3. Test inventory plugin
-echo "[*] Step 3: Testing inventory plugin (GET /api/inventory)..."
-INVENTORY=$(curl -s "http://$RELAY_SERVER/api/inventory" \
+# 3. Test inventory plugin (port 7772 for inventory plugin)
+echo "[*] Step 3: Testing inventory plugin (GET /api/inventory on port 7772)..."
+RELAY_INVENTORY="192.168.1.218:7772"
+INVENTORY=$(curl -s "http://$RELAY_INVENTORY/api/inventory" \
   -H "Authorization: Bearer $(cat $TOKEN_FILE)")
 
 echo "Inventory:"
@@ -76,7 +77,7 @@ else
 fi
 echo ""
 
-# 5. Run Ansible playbook test
+# 5. Run Ansible playbook test (uses relay_inventory.yml with port 7772 for inventory, 7771 for exec)
 echo "[*] Step 5: Running Ansible playbook with relay connection plugin..."
 cd "$SCRIPT_DIR"
 
@@ -84,13 +85,12 @@ export RELAY_TOKEN_FILE="$TOKEN_FILE"
 export ANSIBLE_LIBRARY="./ansible_plugins"
 export ANSIBLE_CONFIG="./ansible.cfg"
 
-echo "[*] Command: ansible-playbook playbooks/test_relay_plugins.yml -i relay_inventory -v"
+echo "[*] Command: ansible-playbook playbooks/test_relay_plugins.yml -i playbooks/relay_inventory.yml -v"
 echo ""
 
 if ansible-playbook \
   playbooks/test_relay_plugins.yml \
-  -i relay_inventory \
-  -e "relay_server_url=http://$RELAY_SERVER" \
+  -i playbooks/relay_inventory.yml \
   -v; then
     echo ""
     echo "[OK] All tests completed successfully!"

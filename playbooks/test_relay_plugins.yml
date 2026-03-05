@@ -17,8 +17,6 @@
 - name: Test AnsibleRelay Plugins (Connection + Inventory)
   hosts: all
   gather_facts: yes
-  vars:
-    relay_server_url: "http://192.168.1.218:7770"
 
   tasks:
     - name: "Test 1: Basic connectivity via relay connection plugin"
