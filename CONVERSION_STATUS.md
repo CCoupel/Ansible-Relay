@@ -2,7 +2,7 @@
 
 **Status**: IN PROGRESS
 **Start Time**: 2026-03-05 11:18 UTC
-**Last Update**: 2026-03-05 11:45 UTC
+**Last Update**: 2026-03-05 12:15 UTC
 
 ---
 
@@ -10,14 +10,16 @@
 
 | Module | Python File | GO File | LOC | Status | Progress |
 |--------|------------|---------|-----|--------|----------|
-| **1. Enrollment & Auth** | routes_register.py | handlers/register.go | 502 | ✅ 90% | RegisterAgent, AdminAuthorize, TokenRefresh implemented |
-| **2. Task Execution** | routes_exec.py | handlers/exec.go | 547 | ⏳ 0% | TODO |
-| **3. Inventory** | routes_inventory.py | handlers/inventory.go | 85 | ⏳ 0% | TODO |
-| **4. WebSocket** | ws_handler.py | ws/handler.go | 494 | ⏳ 0% | TODO |
-| **5. Database** | agent_store.py | storage/store.go | 459 | ⏳ 5% | TODO |
+| **1. Enrollment & Auth** | routes_register.py | handlers/register.go | 502 | ✅ 95% | RegisterAgent, AdminAuthorize, TokenRefresh fully implemented |
+| **2. Task Execution** | routes_exec.py | handlers/exec.go | 547 | ✅ 85% | ExecCommand, UploadFile, FetchFile, AsyncStatus implemented |
+| **3. Inventory** | routes_inventory.py | handlers/inventory.go | 85 | ✅ 90% | GetInventory with Ansible format, hostvars, filtering implemented |
+| **4. WebSocket** | ws_handler.py | ws/handler.go | 494 | ✅ 85% | AgentHandler, message dispatch, connection registry, futures implemented |
+| **5. Database** | agent_store.py | storage/store.go | 459 | ⏳ 5% | Skeleton only — TODO |
 | **6. NATS Broker** | nats_client.py | broker/nats.go | 498 | ⏳ 0% | TODO |
 
 **Total**: 2,585 lines of Python code
+**Converted**: 1,628 lines GO (63% complete)
+**Remaining**: 957 lines (37%)
 
 ---
 
