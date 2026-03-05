@@ -1,14 +1,17 @@
 # BACKLOG AnsibleRelay — 41 tâches
 
 Date création : 2026-03-03
-Status : Phase 0 complète, Phase 1 en attente de confirmation utilisateur
+Date mise à jour : 2026-03-05
+Status : Phase 0-3 complètes, Phase 4 (Production Kubernetes) à démarrer
 
 ## Vue d'ensemble
 
-- **Phase 1 (relay-agent)** : 13 tâches (#4 à #23)
-- **Phase 2 (relay-server)** : 11 tâches (#24 à #34)
-- **Phase 3 (plugins Ansible)** : 7 tâches (#35 à #41)
-- **Total** : 41 tâches
+- **Phase 1 (relay-agent)** : 13 tâches (#4 à #23) ✅ COMPLÈTE
+- **Phase 2 (relay-server)** : 11 tâches (#24 à #34) ✅ COMPLÈTE
+- **Phase 3 (plugins Ansible)** : 7 tâches (#35 à #41) ✅ COMPLÈTE
+- **Phase 4 (Production Kubernetes)** : 12 tâches (#42 à #53) 🆕 À DÉMARRER
+- **Phase 5 (Documentation & Hardening)** : 8 tâches (#54 à #61) 🆕 À DÉMARRER
+- **Total** : 61 tâches
 
 ---
 
@@ -105,21 +108,96 @@ Status : Phase 0 complète, Phase 1 en attente de confirmation utilisateur
 
 ---
 
+## PHASE 4 — Production Kubernetes — 12 tâches
+
+### Prérequis
+- Phase 3 complète et validée
+- Confirmation utilisateur explicite
+- Kubernetes cluster disponible
+- Helm 3.x installé
+
+### Tâches Phase 4
+
+| # | Tâche | Owner | Status | Bloquée par |
+|---|-------|-------|--------|------------|
+| #42 | Helm chart structure — values.yaml, templates/, Chart.yaml | deploy-prod | pending | #40 |
+| #43 | Helm StatefulSet NATS JetStream — persistance, replicas, antiaffinity | deploy-prod | pending | #42 |
+| #44 | Helm Deployment relay-server — multi-port, replicas, PDB | deploy-prod | pending | #42 |
+| #45 | Helm DaemonSet relay-agent — 1 par nœud, node affinity, tolerations | deploy-prod | pending | #42 |
+| #46 | Helm ConfigMap + Secrets — JWT_SECRET, ADMIN_TOKEN, TLS certs | deploy-prod | pending | #42 |
+| #47 | Helm Ingress — TLS termination, routing 7770/7771/7772 | deploy-prod | pending | #42 |
+| #48 | Helm Service (ClusterIP + LoadBalancer) — NATS, relay-api | deploy-prod | pending | #42 |
+| #49 | Helm PersistentVolumeClaim — NATS data, relay DB, agent state | deploy-prod | pending | #42 |
+| #50 | Helm tests — helm lint, helm template, helm dry-run | deploy-prod | pending | #42 |
+| #51 | Helm deployment script — helm install/upgrade sur cluster K8s | deploy-prod | pending | #50 |
+| #52 | Documentation Helm — values.yaml comments, deployment guide, troubleshooting | deploy-prod | pending | #51 |
+| #53 | Deploy prod Phase 4 — Helm install sur Kubernetes cluster | deploy-prod | pending | #52 |
+
+**Validation Phase 4 → Phase 5** :
+- ✓ Helm lint : 0 erreurs
+- ✓ Helm template : YAML valide
+- ✓ Helm dry-run : OK
+- ✓ Deploy sur cluster K8s : 3 agents enregistrés et connectés
+- ✓ Ingress TLS fonctionnelle
+- ✓ Persistance NATS et DB vérifiée après redémarrage pod
+
+---
+
+## PHASE 5 — Documentation & Hardening — 8 tâches
+
+### Prérequis
+- Phase 4 déployée en production
+
+### Tâches Phase 5
+
+| # | Tâche | Owner | Status | Bloquée par |
+|---|-------|-------|--------|------------|
+| #54 | Runbooks prod — escalade, diagnostics, rollback | deploy-prod | pending | #53 |
+| #55 | Monitoring setup — Prometheus métriques, alerting, dashboards Grafana | deploy-prod | pending | #53 |
+| #56 | Hardening sécurité prod — network policies, RBAC, admission controllers | security-reviewer | pending | #53 |
+| #57 | Disaster recovery — backup NATS, DB recovery, failover procedure | deploy-prod | pending | #53 |
+| #58 | Performance tuning — load testing, baseline metrics, optimization | qa | pending | #53 |
+| #59 | Migration guide — from qualif to prod, zero-downtime strategy | deploy-prod | pending | #53 |
+| #60 | SLA & Support — métriques, escalade, on-call procedure | deploy-prod | pending | #53 |
+| #61 | MVP Final Review & Sign-off | cdp | pending | #54-#60 |
+
+**Validation Phase 5 → Live** :
+- ✓ Runbooks testées
+- ✓ Monitoring opérationnel
+- ✓ Security audit : 0 findings CRITIQUE/HAUT
+- ✓ DR tested : RTO/RPO validés
+- ✓ Performance : SLA met
+- ✓ Sign-off CDO + Utilisateur
+
+---
+
 ## Dépendances critiques
 
 ```
+PHASE 1:
 #4 (facts) → #6 (enrollment) → #8 (WSS) → #9 (dispatcher) → #11/#13/#14/#15
 #19 (tests) bloque par toutes tâches Phase 1
 #20 (QA) → #22 (security) → #23 (deploy-qualif Phase 1)
 
+PHASE 2:
 #24 (DB) → #25 (auth) → #26 (WS) + #27 (NATS)
 #26+#27 → #28 (endpoints) → #29 (main)
 #31 (tests) bloque par toutes tâches Phase 2
 #32 (QA) → #33 (security) → #34 (deploy-qualif Phase 2)
 
+PHASE 3:
 #34 (Phase 2 déployée) → #35 (connection) + #36 (inventory)
 #37 (tests E2E) → #38 (QA) → #39 (security global) → #40 (deploy E2E)
-#40 (deploy qualif Phase 3) → #41 (prod) [après confirmation utilisateur]
+#40 (deploy qualif Phase 3) → #41 (prod MVP final) [après confirmation utilisateur]
+
+PHASE 4 (PRODUCTION K8S):
+#40 (MVP qualifié) → #42 (structure Helm)
+#42 → #43/#44/#45/#46/#47/#48/#49 (en parallèle)
+#42 → #50 (tests Helm) → #51 (deploy script) → #52 (docs) → #53 (prod deploy)
+
+PHASE 5 (HARDENING & LIVE):
+#53 (prod déployée) → #54/#55/#56/#57/#58/#59/#60 (en parallèle)
+#54/#55/#56/#57/#58/#59/#60 → #61 (final review & sign-off)
 ```
 
 ---
@@ -152,9 +230,12 @@ Status : Phase 0 complète, Phase 1 en attente de confirmation utilisateur
 
 ## Métriques de succès
 
-| Phase | Métriques |
-|-------|-----------|
-| Phase 1 | 0 test en échec, relay-agent enregistré et connecté en WSS |
-| Phase 2 | 0 test en échec, relay-server reçoit enregistrement, gère WebSocket |
-| Phase 3 | 0 test en échec, playbook Ansible exécuté via plugin relay |
-| MVP | E2E : enrollment → playbook exec → résultat, prod déployée Kubernetes |
+| Phase | Métriques | Status |
+|-------|-----------|--------|
+| Phase 1 | 0 test en échec, relay-agent enregistré et connecté en WSS | ✅ COMPLÈTE |
+| Phase 2 | 0 test en échec, relay-server reçoit enregistrement, gère WebSocket | ✅ COMPLÈTE |
+| Phase 3 | 0 test en échec, playbook Ansible exécuté via plugin relay, inventaire dynamique | ✅ COMPLÈTE |
+| MVP Qualif | E2E : enrollment → playbook exec → résultat sur 192.168.1.218 | ✅ VALIDÉE |
+| Phase 4 | Helm deploy réussie, 3 agents K8s connectés, Ingress TLS OK, persistance vérifiée | 🆕 À FAIRE |
+| Phase 5 | Runbooks testées, monitoring opérationnel, DR validated, sign-off utilisateur | 🆕 À FAIRE |
+| LIVE | Production Kubernetes opérationnelle, SLA garantis, support en place | 🆕 À FAIRE |
