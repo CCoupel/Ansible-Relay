@@ -8,10 +8,14 @@
 
 | Fichier | Contenu |
 |---|---|
-| `DOC/HLD.md` | Architecture haut niveau, schémas composants et flux de messages |
-| `DOC/ARCHITECTURE.md` | Spécifications techniques détaillées (protocoles, formats, sécurité, déploiement) |
-| `DOC/SECURITY.md` | Modèle de sécurité complet (enrollment, rôles, tokens, rotation) |
-| `DOC/BACKLOG.md` | État des phases et tâches |
+| `DOC/common/HLD.md` | Architecture haut niveau, schémas composants et flux de messages |
+| `DOC/common/ARCHITECTURE.md` | Spécifications techniques détaillées (protocoles, formats, sécurité, déploiement) |
+| `DOC/security/SECURITY.md` | Modèle de sécurité complet (enrollment, rôles, tokens, rotation) |
+| `DOC/common/BACKLOG.md` | État des phases et tâches |
+| `DOC/server/SERVER_SPEC.md` | Specs relay-server (API, WS, CLI, schéma DB) |
+| `DOC/agent/AGENT_SPEC.md` | Specs relay-agent (enrollment, WS, executor, async) |
+| `DOC/plugins/PLUGINS_SPEC.md` | Specs plugins Ansible (connection + inventory) |
+| `DOC/inventory/INVENTORY_SPEC.md` | Specs relay-inventory binary GO |
 
 **Lire ces fichiers avant toute implémentation.**
 
@@ -22,12 +26,24 @@ ansible-relay/
 ├── README.md                 # Point d'entrée projet
 ├── CLAUDE.md                 # Instructions Claude Code
 ├── DOC/                      # Documentation vivante (specs, architecture, sécurité)
-│   ├── ARCHITECTURE.md       # Spécifications techniques v1.1+ (§1-§22)
-│   ├── HLD.md                # High-Level Design
-│   ├── SECURITY.md           # Modèle de sécurité complet
-│   ├── BACKLOG.md            # Phases et tâches
-│   ├── DEPLOYMENT.md         # Guide de déploiement
-│   └── QUICKSTART.md         # Démarrage rapide
+│   ├── common/               # Specs transversales
+│   │   ├── ARCHITECTURE.md   # Spécifications techniques v1.1+ (§1-§22)
+│   │   ├── HLD.md            # High-Level Design
+│   │   └── BACKLOG.md        # Phases et tâches
+│   ├── security/             # Modèle de sécurité
+│   │   └── SECURITY.md       # Enrollment, rôles, tokens, rotation
+│   ├── server/               # Specs relay-server
+│   │   ├── SERVER_SPEC.md
+│   │   └── MANAGEMENT_CLI_SPECS.md
+│   ├── agent/                # Specs relay-agent
+│   │   └── AGENT_SPEC.md
+│   ├── inventory/            # Specs relay-inventory
+│   │   └── INVENTORY_SPEC.md
+│   ├── plugins/              # Specs plugins Ansible
+│   │   └── PLUGINS_SPEC.md
+│   └── project/              # Guides opérationnels
+│       ├── QUICKSTART.md
+│       └── DEPLOYMENT.md
 ├── RELEASE/                  # Historique d'implémentation (phases, rapports, migrations)
 ├── GO/                       # Code source GO
 │   ├── cmd/server/           # relay-server (API + WS + CLI cobra)
@@ -51,7 +67,7 @@ ansible-relay/
 - Canal agent : **1 WebSocket persistante** par agent, multiplexée par `task_id`
 - Bus de messages : **NATS JetStream** (streams `RELAY_TASKS` + `RELAY_RESULTS`)
 - Plugin Ansible → serveur : **REST HTTP bloquant**
-- Auth : **JWT signé** (rôles `agent` / `plugin` / `admin`), blacklist JTI — voir `DOC/SECURITY.md`
+- Auth : **JWT signé** (rôles `agent` / `plugin` / `admin`), blacklist JTI — voir `DOC/security/SECURITY.md`
 - `authorized_keys` : **table DB** (pas de fichiers), alimentée par API admin
 - Concurrence agent : **subprocess par tâche** (pas de threads)
 - Stdout MVP : **buffer 5MB max**, truncation + flag
@@ -60,10 +76,11 @@ ansible-relay/
 
 ## Conventions de code
 
-- Python : PEP 8, type hints, docstrings sur les fonctions publiques
-- Async : `asyncio` partout côté serveur et agent (pas de `threading`)
-- Logs : `structlog` ou `logging` standard, **masquer `stdin` si `become=true`**
-- Tests : un fichier de test par module, nommage `test_<module>.py`
+- GO : `gofmt`, erreurs explicitement retournées, pas de panic en production
+- Python (plugins uniquement) : PEP 8, type hints, docstrings sur les fonctions publiques
+- Logs : `log/slog` (GO) — **masquer `become_pass` dans tous les logs** (CRITIQUE sécurité)
+- Tests GO : `JWT_SECRET_KEY=test ADMIN_TOKEN=test go test ./... -v`
+- Tests Python : pytest, fichier `test_<module>.py` par module
 - Commits : conventionnel (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`)
 
 ## Workflow équipe
