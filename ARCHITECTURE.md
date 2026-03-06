@@ -1488,5 +1488,218 @@ En cas de perte complète du relay server :
 
 ---
 
+## 21. CLI de Management — relay-server en mode CLI
+
+### Philosophie : binaire unique, deux modes
+
+Le binaire `relay-server` est le point d'entrée unique pour le serveur ET pour l'administration :
+
+```
+relay-server           # démarre en mode serveur (foreground)
+relay-server -d        # démarre en mode serveur (daemon background)
+relay-server <cmd>     # mode CLI — agit sur le serveur local via env vars
+```
+
+**Avantage** : exécuté depuis l'intérieur du container Docker, l'authentification est gratuite — le binaire lit directement `ADMIN_TOKEN` et `JWT_SECRET_KEY` depuis l'environnement, sans token réseau supplémentaire.
+
+**Framework CLI** : `cobra` (Go)
+
+### Commandes — Gestion des minions
+
+```
+relay-server minions list [--format json|table|yaml]
+  → Tous les agents : hostname, état, last_seen, version
+
+relay-server minions get <hostname> [--format json|table|yaml]
+  → Détail : facts, enrollment_date, authorized_key_fingerprint
+
+relay-server minions set-state <hostname> connected|disconnected
+  → Forcer l'état en DB (sans fermer le WS actif)
+
+relay-server minions suspend <hostname>
+  → Bloquer nouvelles tâches (flag suspended=true en DB)
+  → Répondre 503 à tout /api/exec/{hostname}
+
+relay-server minions resume <hostname>
+  → Lever la suspension
+
+relay-server minions revoke <hostname>
+  → Blacklister le JTI actif → fermer WS (close 4001) → 403 à la reconnexion
+
+relay-server minions authorize <hostname> --key-file <pem>
+  → Pré-enregistrer la clef publique en DB (POST /api/admin/authorize interne)
+
+relay-server minions vars get <hostname> [--format json|yaml]
+  → Afficher les variables Ansible du minion
+
+relay-server minions vars set <hostname> key=value [key2=value2 ...]
+  → Modifier/ajouter des variables Ansible
+
+relay-server minions vars delete <hostname> <key>
+  → Supprimer une variable Ansible
+```
+
+### Commandes — Gestion de sécurité
+
+```
+relay-server security keys status [--format json|table]
+  → Current key   : sha256:abc... (actif depuis Xh)
+  → Previous key  : sha256:def... (expire dans Xh)   [si rotation en cours]
+  → Agents migrés : N/M
+
+relay-server security keys rotate [--grace 24h]
+  → Voir §22 — Rotation des clefs avec période de recouvrement
+
+relay-server security tokens list [--format json|table]
+  → JWT actifs : hostname, jti, issued_at, expires_at, key_generation
+
+relay-server security blacklist list [--format json|table]
+  → JTI révoqués : jti, hostname, revoked_at, reason, expires_at
+
+relay-server security blacklist purge
+  → Supprimer les entrées expirées de la blacklist (ménage DB)
+```
+
+### Commandes — Inventaire
+
+```
+relay-server inventory list [--only-connected] [--format json|yaml|table]
+  → GET /api/inventory — tous les agents ou connectés uniquement
+```
+
+### Commandes — Santé serveur
+
+```
+relay-server server status [--format json|table]
+  → NATS    : connected (nats://localhost:4222) / unreachable
+  → DB      : ok (relay.db, N agents enregistrés)
+  → WS      : N connexions actives
+  → Uptime  : Xh Xm
+
+relay-server server stats [--format json|table]
+  → Agents connectés   : N / M enregistrés
+  → Tâches en cours    : N active
+  → Tâches async       : N pending
+```
+
+### Format de sortie
+
+Toutes les commandes supportent `--format json|table|yaml` (défaut : `table`).
+
+Codes de sortie :
+- `0` : succès
+- `1` : erreur générale
+- `2` : ressource non trouvée (minion inconnu, clef absente)
+- `3` : opération refusée (suspension déjà active, déjà révoqué)
+
+---
+
+## 22. Rotation des clefs — Période de recouvrement
+
+### Problème
+
+Lors d'une rotation de clef JWT (`JWT_SECRET_KEY`), les agents déconnectés conservent un JWT signé avec l'ancienne clef. Sans période de recouvrement, ils seraient tous immédiatement invalidés à leur prochaine reconnexion.
+
+### Mécanisme : dual-key JWT + grace period
+
+#### Phase 1 — Lancement de la rotation
+
+```
+relay-server security keys rotate [--grace 24h]
+```
+
+1. Génère un nouveau `jwt_secret_current`
+2. L'ancien secret devient `jwt_secret_previous`
+3. Persiste les deux secrets en DB (chiffrés au repos)
+4. Génère une nouvelle paire RSA-4096 serveur (`rsa_key_current`)
+5. L'ancienne paire devient `rsa_key_previous`
+6. Enregistre `key_rotation_deadline = now + grace`
+7. Pour chaque agent connecté :
+   - Signe un nouveau JWT avec `jwt_secret_current`
+   - Chiffre ce JWT avec la clef publique de l'agent (en DB)
+   - Envoie via WS : `{"type": "rekey", "token_encrypted": "<base64>"}`
+   - L'agent déchiffre avec sa clef privée → stocke le nouveau JWT → aucune interruption
+
+#### Phase 2 — Pendant la période de grâce
+
+Validation JWT avec fallback :
+
+```
+1. Vérifier avec jwt_secret_current  → si valide : accepter
+2. Si invalide ET now < key_rotation_deadline :
+   a. Vérifier avec jwt_secret_previous → si valide : accepter
+   b. Envoyer immédiatement rekey (opportuniste) via WS
+3. Si invalide ET now >= key_rotation_deadline :
+   → Rejeter (401) → agent se ré-enrôle
+```
+
+#### Phase 3 — Fin de la période de grâce
+
+```
+now >= key_rotation_deadline
+→ jwt_secret_previous ignoré
+→ Les agents encore sur l'ancienne clef reçoivent 401 à la reconnexion WS
+→ Comportement agent : 401 sur connect → supprimer JWT local → POST /api/register → ré-enrôlement
+→ Le serveur chiffre le nouveau JWT avec rsa_key_current
+```
+
+### Schéma DB — table server_config
+
+```sql
+CREATE TABLE IF NOT EXISTS server_config (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+-- Entrées gérées :
+-- jwt_secret_current      : secret HMAC-SHA256 courant (base64)
+-- jwt_secret_previous     : secret précédent (base64, NULL si pas de rotation)
+-- key_rotation_deadline   : timestamp ISO8601 fin de grâce (NULL si pas de rotation)
+-- rsa_key_current         : PEM PKCS8 clef privée RSA courante
+-- rsa_key_previous        : PEM PKCS8 clef privée RSA précédente (NULL si pas de rotation)
+```
+
+### Message WS — rekey
+
+Nouveau type de message serveur → agent :
+
+```json
+{
+  "type": "rekey",
+  "token_encrypted": "<JWT chiffré RSA-OAEP avec la clef publique de l'agent>"
+}
+```
+
+Traitement côté agent :
+1. Déchiffrer `token_encrypted` avec la clef privée RSA locale
+2. Valider le JWT reçu (format, non-expiré)
+3. Écraser le fichier JWT local (`RELAY_JWT_PATH`)
+4. Logger `[SECURITY] JWT rotated — new token received`
+5. Continuer sans interrompre la connexion WS
+
+### Comportement agent — 401 à la connexion WS
+
+Si le serveur rejette la connexion WS avec HTTP 401 (JWT expiré ou révoqué après fin de grâce) :
+
+```
+1. Supprimer le JWT local (os.Remove(cfg.jwtPath))
+2. Ré-enrollment complet (POST /api/register avec la clef publique existante)
+3. Stocker le nouveau JWT chiffré → déchiffrer → sauvegarder
+4. Rouvrir la connexion WS avec le nouveau JWT
+```
+
+### Récapitulatif modifications par composant
+
+| Composant | Modification |
+|---|---|
+| **DB** | Table `server_config` (jwt secrets + RSA keys + deadline) |
+| **Server** | RSA keypair persisté en DB (plus en mémoire) ; dual-key JWT validation ; message WS type `rekey` ; endpoint `security keys rotate` |
+| **CLI** | `security keys rotate [--grace Xh]` + `security keys status` |
+| **Agent** | Handler WS type `rekey` ; gestion 401 sur connect → ré-enrôlement auto |
+
+---
+
 *Document généré le 2026-03-03 — Session de brainstorming architecture AnsibleRelay*
 *Mise à jour v1.1 : déploiement systemd / Docker Compose / Kubernetes, persistance des données*
+*Mise à jour v1.2 : CLI management (§21), rotation des clefs avec période de recouvrement (§22)*

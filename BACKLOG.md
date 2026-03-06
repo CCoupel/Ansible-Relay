@@ -1,8 +1,8 @@
 # BACKLOG AnsibleRelay — 102 tâches
 
 Date création : 2026-03-03
-Date mise à jour : 2026-03-05
-Status : Phase 0-3 complètes, Phase 4-6 planifiées, Phase 7-9 (GO migration) planifiées
+Date mise à jour : 2026-03-06
+Status : Phase 0-3 ✅, Phase 7 ✅, Phase 8 ✅, Phase 9 ✅ — Phase 6 (CLI GO) À DÉMARRER
 
 ## Vue d'ensemble
 
@@ -10,16 +10,18 @@ Status : Phase 0-3 complètes, Phase 4-6 planifiées, Phase 7-9 (GO migration) p
 - **Phase 1 (relay-agent)** : 13 tâches (#4 à #23) ✅ COMPLÈTE
 - **Phase 2 (relay-server)** : 11 tâches (#24 à #34) ✅ COMPLÈTE
 - **Phase 3 (plugins Ansible)** : 7 tâches (#35 à #41) ✅ COMPLÈTE
-- **Phase 4 (Production Kubernetes)** : 12 tâches (#42 à #53) 🆕 À DÉMARRER
-- **Phase 5 (Documentation & Hardening)** : 8 tâches (#54 à #61) 🆕 À DÉMARRER
-- **Phase 6 (Management CLI)** : 8 tâches (#62 à #69) 🆕 À DÉMARRER
+- **Phase 4 (Production Kubernetes)** : 12 tâches (#42 à #53) ⏸ SUSPENDU (no K8s prod)
+- **Phase 5 (Documentation & Hardening)** : 8 tâches (#54 à #61) ⏸ SUSPENDU
 
-### Optimisation (GO)
-- **Phase 7 (Server rewrite GO)** : 12 tâches (#70 à #81) 🆕 À DÉMARRER
-- **Phase 8 (Agent rewrite GO)** : 10 tâches (#82 à #91) 🆕 À DÉMARRER
-- **Phase 9 (Plugins wrapper GO)** : 5 tâches (#92 à #96) 🆕 À DÉMARRER
+### Optimisation (GO) — COMPLÈTES
+- **Phase 7 (Server rewrite GO)** : ✅ COMPLÈTE — GO server 4.65 MiB, 0 restart
+- **Phase 8 (Agent rewrite GO)** : ✅ COMPLÈTE — 94 tests PASS, 3 agents connectés
+- **Phase 9 (Inventory binary GO)** : ✅ COMPLÈTE — relay-inventory, 19 tests PASS
 
-**Total** : 102 tâches
+### CLI & Management (GO)
+- **Phase 6 (Management CLI GO)** : 8 tâches (#62 à #69) 🆕 À DÉMARRER
+
+**Total actif** : 8 tâches Phase 6
 
 ---
 
@@ -179,42 +181,76 @@ Status : Phase 0-3 complètes, Phase 4-6 planifiées, Phase 7-9 (GO migration) p
 
 ---
 
-## PHASE 6 — Management CLI — 8 tâches
+## PHASE 6 — Management CLI GO — 8 tâches
 
 ### Prérequis
-- Phase 4 déployée en production (K8s avec Helm)
-- Phase 5 complète (hardening + monitoring)
+- Phase 7 + 8 + 9 complètes (GO server + agent + inventory binary)
+- `cobra` ajouté aux dépendances go.mod
 
-### Objectif
-CLI de management pour administrer les minions (agents) et l'inventaire Ansible :
-- Lister les minions enregistrés et leur état (connecté/déconnecté/expiré)
-- Visualiser métriques minion (dernière activité, facts, version)
-- Revoquer/supprimer un minion
-- Éditer l'inventaire Ansible (ajouter/modifier/supprimer hosts/variables)
-- Visualiser les logs d'activité par minion
-- Pré-autoriser de nouveaux minions (admin endpoint)
-- Configuration multi-serveur (context, profile)
+### Architecture : même binaire, deux modes
+Le binaire `relay-server` sert de CLI et de serveur (voir ARCHITECTURE.md §21) :
+```
+relay-server            # mode serveur (foreground)
+relay-server -d         # mode serveur (daemon)
+relay-server <cmd>      # mode CLI — auth via env vars du container
+```
+
+### Objectif — Commandes à implémenter
+
+**Gestion des minions** :
+```
+minions list [--format json|table|yaml]
+minions get <hostname>
+minions set-state <hostname> connected|disconnected
+minions suspend <hostname>
+minions resume <hostname>
+minions revoke <hostname>
+minions authorize <hostname> --key-file <pem>
+minions vars get <hostname>
+minions vars set <hostname> key=value [...]
+minions vars delete <hostname> <key>
+```
+
+**Gestion de sécurité** (voir ARCHITECTURE.md §22 — rotation avec grâce) :
+```
+security keys status
+security keys rotate [--grace 24h]
+security tokens list
+security blacklist list
+security blacklist purge
+```
+
+**Inventaire** :
+```
+inventory list [--only-connected] [--format json|yaml|table]
+```
+
+**Santé serveur** :
+```
+server status
+server stats
+```
 
 ### Tâches Phase 6
 
 | # | Tâche | Owner | Status | Bloquée par |
 |---|-------|-------|--------|------------|
-| #62 | Spécifications CLI — commands, options, output format | dev-plugins | pending | #61 |
-| #63 | Backend API — endpoints management (GET /api/admin/minions, DELETE, PATCH) | dev-relay | pending | #62 |
-| #64 | CLI tool (Python click/typer) — minions, inventory, auth commands | dev-plugins | pending | #62 |
-| #65 | CLI auth — login, token management, context switching | dev-plugins | pending | #63 |
-| #66 | CLI inventory editor — view, edit, validate, diff, rollback | dev-plugins | pending | #64 |
-| #67 | Tests unitaires + E2E CLI commands | test-writer | pending | #64, #65, #66 |
-| #68 | QA — CLI tests, help output, edge cases, security | qa | pending | #67 |
-| #69 | CLI package — pip install, bash completion, man pages, Helm chart | deploy-prod | pending | #68 |
+| #62 | Server — endpoints admin manquants : `GET /api/admin/minions`, suspend/resume, vars CRUD, `GET /api/admin/status` | dev-relay | pending | — |
+| #63 | Server — DB `server_config` + persistance RSA keypair + dual-key JWT validation | dev-relay | pending | #62 |
+| #64 | Server — rotation des clefs : `POST /api/admin/keys/rotate`, grace period, message WS `rekey` | dev-relay | pending | #63 |
+| #65 | Agent — handler WS `rekey` + gestion 401 sur connect → ré-enrôlement auto | dev-agent | pending | #64 |
+| #66 | CLI cobra — intégration dans `cmd/server/main.go` : toutes les commandes §21 | dev-relay | pending | #64 |
+| #67 | Tests GO — CLI commands, rotation, rekey, 401 ré-enrôlement | test-writer | pending | #65, #66 |
+| #68 | QA — `go test ./...` 0 fail + smoke test CLI depuis container | qa | pending | #67 |
+| #69 | Deploy qualif Phase 6 — CLI fonctionnelle sur 192.168.1.218 | deploy-qualif | pending | #68 |
 
-**Validation Phase 6 → Production** :
+**Validation Phase 6** :
 - ✓ TOUTES tâches #62-#69 completed
 - ✓ qa : 0 test en échec
-- ✓ CLI opérationnelle : minions list/detail/revoke/delete, inventory edit/diff/rollback
-- ✓ Security : JWT auth, token storage (secure), admin-only commands
-- ✓ Usability : --help, bash completion, clear output formatting
-- ✓ Performance : API response < 500ms, CLI latency < 1s
+- ✓ CLI opérationnelle depuis `docker exec relay-server <cmd>`
+- ✓ Rotation des clefs avec période de grâce : agents migrés sans interruption
+- ✓ Agent : handler `rekey` + ré-enrôlement sur 401 automatique
+- ✓ `--format json|table|yaml` sur toutes les commandes
 - ✓ Confirmation utilisateur
 
 ---
