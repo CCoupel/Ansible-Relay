@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AnsibleRelay — Ansible sans SSH entrant</title>
+  <meta name="description" content="Exécutez des playbooks Ansible sur des hôtes derrière NAT, firewall ou DMZ. Zero Trust, TLS partout, JWT + RSA-4096.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo">Ansible<span>Relay</span></div>
+  <ul class="nav-links">
+    <li><a href="#problem">Problème</a></li>
+    <li><a href="#solution">Solution</a></li>
+    <li><a href="#security">Sécurité</a></li>
+    <li><a href="#features">Fonctionnalités</a></li>
+    <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#quickstart">Démarrage</a></li>
+    <li><a href="https://github.com/CCoupel/Ansible-Relay">GitHub ↗</a></li>
+  </ul>
+</nav>
+
+<!-- HERO -->
+<section id="hero">
+  <div class="container">
+    <div class="hero-badges">
+      <span class="badge">Zero Trust</span>
+      <span class="badge">TLS Everywhere</span>
+      <span class="badge">JWT + RSA-4096</span>
+      <span class="badge">Ansible natif</span>
+      <span class="badge">Open Source</span>
+    </div>
+    <h1>Ansible sans<br><span>SSH entrant</span></h1>
+    <p class="subtitle">
+      Exécutez vos playbooks Ansible sur des hôtes derrière NAT, firewall ou DMZ.
+      Les agents initient eux-mêmes la connexion — vous n'ouvrez aucun port entrant.
+    </p>
+    <div class="cta-group">
+      <a href="#quickstart" class="btn btn-primary">Démarrage rapide</a>
+      <a href="https://github.com/CCoupel/Ansible-Relay" class="btn btn-outline">Voir sur GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- PROBLÈME -->
+<section id="problem">
+  <div class="container">
+    <h2>Le problème avec SSH entrant</h2>
+    <p>Ansible repose sur SSH : le Control Node doit joindre chaque hôte sur le port 22.
+       Ce modèle bloque sur des infrastructures modernes.</p>
+
+    <div class="problem-grid">
+      <div class="problem-card">
+        <div class="icon">🔒</div>
+        <h3>NAT / Firewall</h3>
+        <p>Les hôtes en réseau privé n'ont pas de port 22 accessible depuis l'extérieur.
+           Ouvrir ce port représente une surface d'attaque inacceptable.</p>
+      </div>
+      <div class="problem-card">
+        <div class="icon">🏭</div>
+        <h3>DMZ / Cloud privé</h3>
+        <p>Les politiques de sécurité interdisent les connexions entrantes dans les DMZ.
+           Les flux de contrôle doivent partir de l'intérieur.</p>
+      </div>
+      <div class="problem-card">
+        <div class="icon">📡</div>
+        <h3>Edge computing</h3>
+        <p>Des centaines de sites distants avec connexions sortantes uniquement,
+           IPs dynamiques, sans VPN centralisé.</p>
+      </div>
+      <div class="problem-card">
+        <div class="icon">⚖️</div>
+        <h3>Salt Minion ? Non.</h3>
+        <p>Salt résout la connexion mais abandonne la compatibilité Ansible.
+           Impossible de réutiliser vos rôles, collections et inventaires existants.</p>
+      </div>
+    </div>
+
+    <div class="arch-diagram" style="margin-top:2.5rem"><span class="c-ansible">Ansible Control Node</span> <span class="c-arrow">──SSH──▶</span> <span class="c-agent">Hôte cible</span>   <span style="color:#f85149">← BLOQUÉ si hôte derrière NAT/firewall</span></div>
+  </div>
+</section>
+
+<!-- SOLUTION -->
+<section id="solution">
+  <div class="container">
+    <h2>Le modèle inversé AnsibleRelay</h2>
+    <p>AnsibleRelay inverse le flux de contrôle. L'agent sur l'hôte cible initie
+       une connexion WebSocket persistante vers le serveur relay.
+       Ansible n'a besoin d'atteindre que le relay server — jamais les hôtes directement.</p>
+
+    <div class="arch-diagram"><span class="c-ansible">Ansible Control Node</span>
+<span class="c-arrow">  │ HTTPS (REST)</span>
+<span class="c-arrow">  ▼</span>
+<span class="c-relay">┌─────────────────────────────────────────┐</span>
+<span class="c-relay">│           Relay Server                  │</span>
+<span class="c-relay">│   Go · NATS JetStream · SQLite          │</span>
+<span class="c-relay">│   Auth JWT · Blacklist JTI              │</span>
+<span class="c-relay">└──────────────▲──────────────────────────┘</span>
+<span class="c-arrow">               │ WSS persistant (TLS)</span>
+<span class="c-arrow">               │ Initié par l'agent ↑</span>
+<span class="c-agent">┌──────────────┴──────────────────────────┐</span>
+<span class="c-agent">│   Agents (relay-agent · systemd)        │</span>
+<span class="c-agent">│   host-A   host-B   host-C   host-N     │</span>
+<span class="c-agent">│   NAT · DMZ · Cloud privé · Edge        │</span>
+<span class="c-agent">└─────────────────────────────────────────┘</span></div>
+
+    <div class="security-grid">
+      <div class="sec-card">
+        <h3>Connection Plugin</h3>
+        <p>Remplace SSH dans Ansible. Vos playbooks existants fonctionnent sans modification —
+           changez juste <code>connection: relay</code> dans ansible.cfg.</p>
+      </div>
+      <div class="sec-card">
+        <h3>Inventory Plugin</h3>
+        <p>Inventaire dynamique automatique. Tous les agents connectés apparaissent
+           dans Ansible avec leurs facts et variables.</p>
+      </div>
+      <div class="sec-card">
+        <h3>NATS JetStream</h3>
+        <p>Bus de messages persistant entre nodes relay. Haute disponibilité native :
+           N nodes relay, routing transparent via cluster NATS.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SÉCURITÉ -->
+<section id="security">
+  <div class="container">
+    <h2>Sécurité by design</h2>
+    <p>AnsibleRelay est conçu autour d'un modèle Zero Trust.
+       Chaque décision d'architecture a une justification sécurité explicite,
+       documentée dans les specs techniques.</p>
+
+    <div class="security-grid">
+      <div class="sec-card">
+        <h3>RSA-4096 par agent</h3>
+        <p>Chaque agent génère sa paire de clefs RSA-4096 au premier démarrage.
+           La clef privée ne quitte jamais l'hôte.</p>
+      </div>
+      <div class="sec-card">
+        <h3>Enrôlement contrôlé</h3>
+        <p>La clef publique de l'agent doit être pré-autorisée en base de données
+           avant tout enrôlement. Zéro TOFU (Trust On First Use).</p>
+      </div>
+      <div class="sec-card">
+        <h3>JWT chiffré RSAES-OAEP</h3>
+        <p>Le token JWT retourné à l'agent est chiffré avec sa clef publique RSA.
+           Illisible sans la clef privée, même en cas d'interception.</p>
+      </div>
+      <div class="sec-card">
+        <h3>Blacklist JTI</h3>
+        <p>Révocation immédiate par JTI (JWT ID unique). La connexion WebSocket active
+           est fermée avec le code 4001 — l'agent ne reconnecte pas.</p>
+      </div>
+      <div class="sec-card">
+        <h3>Dual-key JWT</h3>
+        <p>Rotation des secrets JWT sans interruption de service. Grace period
+           configurable : les anciens tokens restent valides pendant la migration.</p>
+      </div>
+      <div class="sec-card">
+        <h3>TLS obligatoire</h3>
+        <p>WSS (WebSocket over TLS) et HTTPS sur toutes les connexions.
+           Terminaison TLS via Caddy. Aucun plain HTTP accepté.</p>
+      </div>
+      <div class="sec-card">
+        <h3>become_pass masqué</h3>
+        <p>Le mot de passe d'élévation sudo/su est transmis via stdin chiffré
+           et masqué dans tous les logs — agent, serveur, plugins Ansible.</p>
+      </div>
+      <div class="sec-card">
+        <h3>AES-256-GCM</h3>
+        <p>Les secrets serveur (RSA keypair, JWT secrets) sont chiffrés en base
+           de données via AES-256-GCM dérivé de RSA_MASTER_KEY.</p>
+      </div>
+    </div>
+
+    <table class="sec-table">
+      <thead>
+        <tr>
+          <th>Vecteur d'attaque</th>
+          <th>SSH classique</th>
+          <th>AnsibleRelay</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Port entrant exposé</td><td class="ko">Port 22 ouvert</td><td class="ok">Aucun port entrant</td></tr>
+        <tr><td>Interception du token d'auth</td><td class="ko">Clef SSH en clair sur disque</td><td class="ok">JWT chiffré RSA-OAEP</td></tr>
+        <tr><td>Agent compromis → propagation</td><td class="ko">Clef SSH donne accès direct</td><td class="ok">JTI révocable immédiatement</td></tr>
+        <tr><td>Agent non autorisé</td><td class="ko">TOFU implicite possible</td><td class="ok">Pre-authorize obligatoire</td></tr>
+        <tr><td>Rotation des secrets</td><td class="ko">Manuelle, downtime</td><td class="ok">Dual-key, grace period, zero downtime</td></tr>
+        <tr><td>Fuite become_pass dans logs</td><td class="ko">Risque selon configuration</td><td class="ok">Masqué dans tous les logs</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- FONCTIONNALITÉS -->
+<section id="features">
+  <div class="container">
+    <h2>Fonctionnalités implémentées</h2>
+    <p>AnsibleRelay est développé par phases incrémentales, chacune validée
+       par des tests automatisés et un audit sécurité avant déploiement.</p>
+
+    <div class="version-block">
+      <span class="version-tag">v0.1 — Agent Python MVP</span>
+      <ul class="feature-list">
+        <li>Enrollment RSA-4096 : génération clef, POST /api/register, JWT OAEP</li>
+        <li>Connexion WSS persistante avec reconnexion backoff exponentiel (1s → 60s)</li>
+        <li>Exécution de commandes via subprocess (buffer stdout 5 MB, timeout, kill)</li>
+        <li>Transfert de fichiers : put_file et fetch_file (base64, limite 500 KB)</li>
+        <li>Élévation de privilèges : become via stdin, become_pass masqué dans logs</li>
+        <li>Registre async persisté JSON : reprise après redémarrage agent</li>
+        <li>Déploiement systemd : Restart=on-failure, User dédié, NoNewPrivileges</li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <span class="version-tag">v0.2 — Serveur Python (FastAPI + NATS)</span>
+      <ul class="feature-list">
+        <li>API REST FastAPI : /api/register, /api/exec, /api/upload, /api/fetch, /api/inventory</li>
+        <li>NATS JetStream : streams RELAY_TASKS + RELAY_RESULTS, routing inter-nodes HA</li>
+        <li>Auth JWT : rôles agent/plugin/admin, blacklist JTI, révocation WS code 4001</li>
+        <li>SQLite : tables agents, authorized_keys, blacklist avec schéma versionné</li>
+        <li>Admin : POST /api/admin/authorize, POST /api/admin/revoke</li>
+        <li>Inventaire dynamique : format JSON Ansible standard, filtre only_connected</li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <span class="version-tag">v0.3 — Plugins Ansible</span>
+      <ul class="feature-list">
+        <li>Connection plugin : remplace SSH, exec_command / put_file / fetch_file natifs</li>
+        <li>become support : transmission become_pass au serveur relay</li>
+        <li>Inventory plugin : GET /api/inventory → hostvars + groupes Ansible</li>
+        <li>Configuration via ansible.cfg ou variables d'hôte (ansible_connection: relay)</li>
+        <li>Mapping HTTP → AnsibleConnectionError : 503 UNREACHABLE, 504 timeout</li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <span class="version-tag">v1.0 — Réécriture Go (server + agent + inventory)</span>
+      <ul class="feature-list">
+        <li>Serveur Go : binaire 4.65 MiB, 0 restart en production, goroutines</li>
+        <li>Agent Go : 94 tests PASS, 3 agents qualif connectés en continu</li>
+        <li>relay-inventory : binaire Go standalone, 19 tests, format Ansible natif</li>
+        <li>SQLite via modernc (CGO-free), Gorilla WebSocket, JWT Go natif</li>
+        <li>Dockerfile multi-stage golang:alpine → alpine : image minimale</li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <span class="version-tag">v1.1 — CLI Management</span>
+      <ul class="feature-list">
+        <li>CLI cobra intégrée dans le binaire relay-server (zéro binaire supplémentaire)</li>
+        <li>minions : list / get / suspend / resume / revoke / authorize / vars (get/set/delete)</li>
+        <li>security : keys status / rotate --grace Nh · tokens list · blacklist list</li>
+        <li>inventory list --only-connected · server status / stats</li>
+        <li>--format table|json|yaml sur toutes les commandes</li>
+        <li>Dual-key JWT : rotation sans interruption, grace period configurable</li>
+        <li>Message WS rekey : agents migrent vers le nouveau secret sans déconnexion</li>
+        <li>AES-256-GCM : chiffrement RSA keypair serveur et JWT secrets en DB</li>
+        <li>441 tests PASS, 0 fail · Audit sécurité : 0 CRITIQUE, 0 HAUT</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ROADMAP -->
+<section id="roadmap">
+  <div class="container">
+    <h2>Roadmap</h2>
+    <p>Les phases suivantes sont spécifiées dans ARCHITECTURE.md et prêtes à démarrer.</p>
+
+    <div class="timeline">
+      <div class="tl-item">
+        <div class="tl-dot future"></div>
+        <div class="tl-content">
+          <h3>Production Kubernetes</h3>
+          <p>Helm chart complet : Deployment relay-api (replicas 3), StatefulSet NATS JetStream
+             (cluster, PVC 20Gi fast-ssd), Ingress nginx avec TLS cert-manager, Secrets K8s pour
+             JWT_SECRET_KEY et ADMIN_TOKEN. PostgreSQL externe (RDS/CloudSQL) en remplacement de SQLite.</p>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-dot future"></div>
+        <div class="tl-content">
+          <h3>Documentation &amp; Hardening</h3>
+          <p>Rate limiting sur les endpoints sensibles (/api/register, /api/exec),
+             audit logs structurés (JSON, syslog), RBAC granulaire par hostgroup,
+             métriques Prometheus / Grafana dashboard, runbook opérationnel.</p>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-dot future"></div>
+        <div class="tl-content">
+          <h3>Plugin FreeIPA</h3>
+          <p>Intégration enterprise : enrollment via ipa-client-install, authentification
+             mTLS avec certificats signés par l'AC FreeIPA (Dogtag), révocation via CRL/OCSP,
+             inventory plugin LDAP (hostgroups IPA → groupes Ansible natifs).</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section id="architecture">
+  <div class="container">
+    <h2>Architecture détaillée</h2>
+    <p>Vue des trois connexions du système et de la haute disponibilité multi-nodes.</p>
+
+    <div class="arch-diagram"><span class="c-ansible">  Ansible Control Node</span>
+<span class="c-arrow">  │ HTTPS (REST bloquant)</span>
+<span class="c-arrow">  │ connection plugin + inventory plugin</span>
+<span class="c-arrow">  ▼</span>
+<span class="c-relay">┌────────────────────────────────────────────────┐</span>
+<span class="c-relay">│            Load Balancer (optionnel)            │</span>
+<span class="c-relay">└──────────────┬─────────────────┬───────────────┘</span>
+<span class="c-arrow">               │                 │</span>
+<span class="c-relay">┌──────────────▼──┐     ┌────────▼──────────────┐</span>
+<span class="c-relay">│  Relay Server   │     │  Relay Server          │</span>
+<span class="c-relay">│  Node #1        │     │  Node #2               │</span>
+<span class="c-relay">│  Go · SQLite    │     │  Go · SQLite           │</span>
+<span class="c-relay">└──────────┬──────┘     └──────┬─────────────────┘</span>
+<span class="c-arrow">           │  NATS TCP          │</span>
+<span class="c-relay">┌──────────▼────────────────▼───────────────────┐</span>
+<span class="c-relay">│              NATS JetStream Cluster           │</span>
+<span class="c-relay">│  RELAY_TASKS  (tasks.{hostname},  WorkQueue)  │</span>
+<span class="c-relay">│  RELAY_RESULTS (results.{task_id}, TTL 60s)   │</span>
+<span class="c-relay">└───────────────────────────────────────────────┘</span>
+<span class="c-arrow">                         ▲</span>
+<span class="c-arrow">                         │ WSS persistant (TLS)</span>
+<span class="c-agent">┌────────────────────────────────────────────────┐</span>
+<span class="c-agent">│            Hôtes gérés (relay-agent)           │</span>
+<span class="c-agent">│  host-A    host-B    host-C    host-N          │</span>
+<span class="c-agent">│  NAT · DMZ · Cloud privé · Edge               │</span>
+<span class="c-agent">│  systemd · RSA-4096 · reconnexion auto        │</span>
+<span class="c-agent">└────────────────────────────────────────────────┘</span></div>
+  </div>
+</section>
+
+<!-- QUICKSTART -->
+<section id="quickstart">
+  <div class="container">
+    <h2>Démarrage rapide</h2>
+    <p>AnsibleRelay se déploie en quelques minutes avec Docker Compose.</p>
+
+    <div class="qs-steps">
+      <div class="qs-step">
+        <div class="step-num">1</div>
+        <div>
+          <h3>Démarrer le serveur relay</h3>
+          <pre><code>git clone https://github.com/CCoupel/Ansible-Relay.git
+cd Ansible-Relay/GO
+
+export JWT_SECRET_KEY="$(openssl rand -hex 32)"
+export ADMIN_TOKEN="$(openssl rand -hex 16)"
+export RSA_MASTER_KEY="$(openssl rand -hex 32)"
+
+docker compose up -d</code></pre>
+        </div>
+      </div>
+
+      <div class="qs-step">
+        <div class="step-num">2</div>
+        <div>
+          <h3>Autoriser un agent (pre-authorize)</h3>
+          <pre><code># La clef publique est générée par l'agent au premier boot
+docker exec relay-api relay-server minions authorize my-host \
+  --pubkey "$(cat /path/to/my-host_pubkey.pem)"</code></pre>
+        </div>
+      </div>
+
+      <div class="qs-step">
+        <div class="step-num">3</div>
+        <div>
+          <h3>Installer l'agent sur l'hôte cible</h3>
+          <pre><code># Sur l'hôte cible (Linux, connexion sortante uniquement)
+RELAY_SERVER_URL=wss://relay.example.com \
+  ./relay-agent --hostname my-host
+
+# Ou via systemd (production)
+systemctl enable --now relay-agent</code></pre>
+        </div>
+      </div>
+
+      <div class="qs-step">
+        <div class="step-num">4</div>
+        <div>
+          <h3>Configurer Ansible</h3>
+          <pre><code># ansible.cfg
+[defaults]
+inventory  = relay_inventory.py
+connection = relay
+
+[relay_connection]
+server_url = https://relay.example.com
+token      = ${ANSIBLE_RELAY_TOKEN}</code></pre>
+        </div>
+      </div>
+
+      <div class="qs-step">
+        <div class="step-num">5</div>
+        <div>
+          <h3>Lancer un playbook &amp; gérer les agents</h3>
+          <pre><code># Lancer un playbook Ansible (aucune modification requise)
+ansible-playbook site.yml
+
+# Gérer les agents depuis le container
+docker exec relay-api relay-server minions list --format table
+docker exec relay-api relay-server server status --format json
+
+# Rotation des clefs JWT (zero downtime, grace 24h)
+docker exec relay-api relay-server security keys rotate --grace 24h</code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <div class="footer-inner">
+      <span>AnsibleRelay — Open Source · MIT License</span>
+      <div class="footer-links">
+        <a href="https://github.com/CCoupel/Ansible-Relay">GitHub</a>
+        <a href="https://github.com/CCoupel/Ansible-Relay/blob/master/ARCHITECTURE.md">Specs techniques</a>
+        <a href="https://github.com/CCoupel/Ansible-Relay/issues">Issues</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
