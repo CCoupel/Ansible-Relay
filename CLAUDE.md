@@ -8,41 +8,41 @@
 
 | Fichier | Contenu |
 |---|---|
-| `HLD.md` | Architecture haut niveau, schémas composants et flux de messages |
-| `ARCHITECTURE.md` | Spécifications techniques détaillées (protocoles, formats, sécurité, déploiement) |
+| `DOC/HLD.md` | Architecture haut niveau, schémas composants et flux de messages |
+| `DOC/ARCHITECTURE.md` | Spécifications techniques détaillées (protocoles, formats, sécurité, déploiement) |
+| `DOC/SECURITY.md` | Modèle de sécurité complet (enrollment, rôles, tokens, rotation) |
+| `DOC/BACKLOG.md` | État des phases et tâches |
 
-**Lire ces deux fichiers avant toute implémentation.**
+**Lire ces fichiers avant toute implémentation.**
 
 ## Structure du projet
 
 ```
 ansible-relay/
-├── agent/                    # Daemon client (relay-agent) — systemd
-│   ├── relay_agent.py        # Point d'entrée principal
-│   ├── async_registry.py     # Registre jobs Ansible async
-│   ├── facts_collector.py    # Collecte facts système
-│   └── relay-agent.service   # Unit file systemd
-├── server/                   # Relay server — FastAPI + NATS
-│   ├── api/                  # Routes FastAPI
-│   └── db/                   # ORM / store SQLite → PostgreSQL
-├── ansible_plugins/
-│   ├── connection_plugins/relay.py       # Remplace SSH
-│   └── inventory_plugins/relay_inventory.py
-├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── robustness/
-├── HLD.md                    # High-Level Design
-├── ARCHITECTURE.md           # Spécifications techniques v1.1
-└── docker-compose.yml        # Déploiement tests/qualif (à créer)
+├── README.md                 # Point d'entrée projet
+├── CLAUDE.md                 # Instructions Claude Code
+├── DOC/                      # Documentation vivante (specs, architecture, sécurité)
+│   ├── ARCHITECTURE.md       # Spécifications techniques v1.1+ (§1-§22)
+│   ├── HLD.md                # High-Level Design
+│   ├── SECURITY.md           # Modèle de sécurité complet
+│   ├── BACKLOG.md            # Phases et tâches
+│   ├── DEPLOYMENT.md         # Guide de déploiement
+│   └── QUICKSTART.md         # Démarrage rapide
+├── RELEASE/                  # Historique d'implémentation (phases, rapports, migrations)
+├── GO/                       # Code source GO
+│   ├── cmd/server/           # relay-server (API + WS + CLI cobra)
+│   ├── cmd/agent/            # relay-agent
+│   └── cmd/inventory/        # relay-inventory binary
+└── ansible_minion/           # Docker Compose qualif
 ```
 
 ## Stack technique
 
-- **Agent** : Python 3.11+, asyncio, websockets, subprocess
-- **Serveur** : Python 3.11+, FastAPI, NATS JetStream (nats.py), SQLite/PostgreSQL, JWT
-- **Plugins Ansible** : Python, Ansible ConnectionBase / InventoryModule
-- **Tests** : pytest, pytest-asyncio, httpx
+- **Agent** : GO, gorilla/websocket, subprocess, RSA-4096, JWT
+- **Serveur** : GO, net/http, gorilla/websocket, NATS JetStream, SQLite (modernc)
+- **Inventory** : GO binary standalone (`relay-inventory`)
+- **Plugins Ansible** : Python (contrainte Ansible — ConnectionBase / InventoryModule)
+- **Tests** : `JWT_SECRET_KEY=test ADMIN_TOKEN=test go test ./... -v`
 - **Déploiement** : systemd (agent), Docker Compose (qualif), Kubernetes (prod)
 
 ## Décisions techniques majeures (non négociables)
@@ -51,7 +51,7 @@ ansible-relay/
 - Canal agent : **1 WebSocket persistante** par agent, multiplexée par `task_id`
 - Bus de messages : **NATS JetStream** (streams `RELAY_TASKS` + `RELAY_RESULTS`)
 - Plugin Ansible → serveur : **REST HTTP bloquant**
-- Auth : **JWT signé** (rôles `agent` / `plugin` / `admin`), blacklist JTI
+- Auth : **JWT signé** (rôles `agent` / `plugin` / `admin`), blacklist JTI — voir `DOC/SECURITY.md`
 - `authorized_keys` : **table DB** (pas de fichiers), alimentée par API admin
 - Concurrence agent : **subprocess par tâche** (pas de threads)
 - Stdout MVP : **buffer 5MB max**, truncation + flag
