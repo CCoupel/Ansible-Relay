@@ -1,0 +1,78 @@
+# Build stage — relay-agent GO
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /build
+
+# Install build dependencies (no CGO needed for agent — pure Go)
+RUN apk add --no-cache git
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the agent binary — no CGO (no sqlite in agent)
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-s -w" -o relay-agent ./cmd/agent
+
+# Runtime stage — minimal Alpine
+FROM alpine:3.18
+
+WORKDIR /app
+
+# ca-certificates for TLS + openssl to pre-generate RSA key in entrypoint + su-exec
+RUN apk add --no-cache ca-certificates openssl su-exec
+
+# Create non-root user
+RUN addgroup -S relay && adduser -S relay -G relay
+
+# Copy binary from builder
+COPY --from=builder /build/relay-agent /app/relay-agent
+
+# Entrypoint: runs as root to set up dirs + key, then drops to relay via su-exec
+# Workaround for Go os.IsNotExist() not handling wrapped errors (uses errors.Is instead)
+COPY --chmod=755 <<'EOF' /app/entrypoint.sh
+#!/bin/sh
+set -e
+
+KEY_PATH="${RELAY_PRIVATE_KEY:-/var/lib/relay-agent/id_rsa}"
+JWT_PATH="${RELAY_JWT_PATH:-/var/lib/relay-agent/token.jwt}"
+ASYNC_DIR="${RELAY_ASYNC_DIR:-/var/lib/relay-agent/async}"
+
+# Create required directories
+mkdir -p "${ASYNC_DIR}"
+mkdir -p "$(dirname ${KEY_PATH})"
+mkdir -p "$(dirname ${JWT_PATH})"
+
+# Pre-generate RSA-4096 key if not present
+# This is needed because the Go agent uses os.IsNotExist() which doesn't
+# handle fmt.Errorf("%w") wrapped errors (fixed in enrollment.go by using errors.Is)
+if [ ! -f "${KEY_PATH}" ]; then
+    echo "[ENTRYPOINT] Generating RSA-4096 key at ${KEY_PATH}"
+    openssl genrsa -out "${KEY_PATH}" 4096 2>/dev/null
+    chmod 600 "${KEY_PATH}"
+    echo "[ENTRYPOINT] RSA key generated"
+fi
+
+# Fix ownership
+chown -R relay:relay "$(dirname ${KEY_PATH})" 2>/dev/null || true
+chown -R relay:relay "$(dirname ${JWT_PATH})" 2>/dev/null || true
+chown -R relay:relay "${ASYNC_DIR}" 2>/dev/null || true
+
+exec su-exec relay /app/relay-agent "$@"
+EOF
+
+# Default config via environment — overridden per container
+ENV RELAY_SERVER_URL="https://localhost:7770" \
+    RELAY_WS_URL="wss://localhost:7772/ws/agent" \
+    RELAY_PRIVATE_KEY="/var/lib/relay-agent/id_rsa" \
+    RELAY_JWT_PATH="/var/lib/relay-agent/token.jwt" \
+    RELAY_ASYNC_DIR="/var/lib/relay-agent/async" \
+    RELAY_INSECURE_TLS="false" \
+    MAX_CONCURRENT_TASKS="10"
+
+ENTRYPOINT ["/app/entrypoint.sh"]

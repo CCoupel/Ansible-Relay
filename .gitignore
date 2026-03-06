@@ -43,8 +43,21 @@ relay_token.jwt
 # Runtime
 *.db
 *.sqlite
+*.db-shm
+*.db-wal
 *.log
 /var/
+
+# Go binaries (built artifacts)
+GO/relay-server
+GO/relay-server-linux
+GO/relay-agent
+GO/inventory
+GO/inventory.exe
+GO/test_results.txt
+
+# Secrets / env files
+qualif/*.env
 
 # Claude local settings
 .claude/settings.local.json
