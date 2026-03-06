@@ -3,6 +3,7 @@
 > Référence complète pour le composant relay-agent (GO).
 > Source canonique : `DOC/common/ARCHITECTURE.md` §2, §4, §9-§13, §16, §18
 > Sécurité : `DOC/security/SECURITY.md` §3 (enrollment), §4 (connexion WS)
+> **Contrats d'interface** : `DOC/contracts/REST_ENROLLMENT.md` · `DOC/contracts/WEBSOCKET.md`
 
 ---
 

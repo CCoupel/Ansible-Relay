@@ -3,6 +3,7 @@
 > Référence pour le binaire relay-inventory GO (Phase 9).
 > Source canonique : `DOC/common/ARCHITECTURE.md` §14
 > Plugin Python : `DOC/plugins/PLUGINS_SPEC.md` §4
+> **Contrat d'interface** : `DOC/contracts/REST_PLUGIN.md` §2 (GET /api/inventory)
 
 ---
 

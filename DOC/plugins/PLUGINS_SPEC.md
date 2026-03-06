@@ -3,6 +3,7 @@
 > Référence pour les plugins Ansible du projet AnsibleRelay (Python).
 > Source canonique : `DOC/common/ARCHITECTURE.md` §6, §8, §11, §12, §13, §14, §16
 > Sécurité : `DOC/security/SECURITY.md` §6 (auth plugin tokens)
+> **Contrat d'interface** : `DOC/contracts/REST_PLUGIN.md`
 
 ---
 
