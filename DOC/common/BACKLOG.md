@@ -1,8 +1,8 @@
-# BACKLOG AnsibleRelay — 102 tâches
+# BACKLOG AnsibleRelay — 112 tâches
 
 Date création : 2026-03-03
 Date mise à jour : 2026-03-06
-Status : Phase 1-3 ✅, Phase 6 ✅, Phase 7 ✅, Phase 8 ✅, Phase 9 ✅ — Phase 4/5 SUSPENDUES (no K8s prod actuelle)
+Status : Phase 1-3 ✅, Phase 6 ✅, Phase 7 ✅, Phase 8 ✅, Phase 9 ✅ — Phase 4/5 SUSPENDUES (no K8s prod actuelle) — Phase 10 🆕 PROCHAINE
 
 ## Vue d'ensemble
 
@@ -21,7 +21,10 @@ Status : Phase 1-3 ✅, Phase 6 ✅, Phase 7 ✅, Phase 8 ✅, Phase 9 ✅ — P
 ### CLI & Management (GO)
 - **Phase 6 (Management CLI GO)** : 8 tâches (#62 à #69) ✅ COMPLÈTE — CLI cobra opérationnelle, rotation clefs validée
 
-**Total actif** : 0 tâches (Phases 4-5 suspendues, toutes phases development complètes)
+### Sécurité enrollment (prochaine phase active)
+- **Phase 10 (Enrollment Token Security)** : 10 tâches (#97 à #106) 🆕 À FAIRE
+
+**Total actif** : 10 tâches (Phase 10)
 
 ---
 
@@ -391,6 +394,88 @@ response → Ansible module result
 
 ---
 
+## PHASE 10 — Enrollment Token Security — 9 tâches
+
+### Contexte
+
+Le modèle d'enrollment actuel utilise des `authorized_keys` pré-provisionnées (admin ajoute
+`{hostname, pubkey_pem}` avant le démarrage de l'agent). Ce modèle est circulaire en pratique :
+l'admin doit connaître la pubkey de l'agent avant son 1er démarrage.
+
+Le modèle cible (SECURITY.md §3) utilise un **enrollment token single-use** + **challenge-response
+RSA-OAEP** : l'admin émet un token lié à un hostname, l'agent l'utilise pour prouver son
+identité sans que la pubkey soit connue à l'avance.
+
+### Prérequis
+- Phases 7 + 8 complètes (GO server + agent)
+- Lire SECURITY.md §3 (enrollment token + challenge-response) et §6 (plugin tokens)
+
+### Architecture cible
+
+```
+Admin                    Server                        Agent (hôte cible)
+  │                        │                              │
+  │ CLI: tokens create     │                              │
+  │ --role enrollment      │                              │
+  │ --hostname my-host     │                              │
+  │ --expires 24h          │                              │
+  │──────────────────────>│                              │
+  │ token: "relay_enr_..." │                              │  ← affiché une seule fois
+  │<──────────────────────│                              │
+  │                        │                              │
+  │  (transmet le token à l'opérateur déployant l'agent) │
+  │                        │                              │
+  │                        │  POST /api/register          │
+  │                        │  {hostname, pubkey, token}   │
+  │                        │<─────────────────────────────│
+  │                        │                              │
+  │                        │ [valide token :              │
+  │                        │  existe, non expiré,         │
+  │                        │  non utilisé,                │
+  │                        │  hostname correspond]        │
+  │                        │                              │
+  │                        │  {challenge: OAEP(nonce, agent_pubkey)}
+  │                        │─────────────────────────────>│
+  │                        │                              │ [déchiffre nonce]
+  │                        │  {response: OAEP(nonce+token, server_pubkey)}
+  │                        │<─────────────────────────────│
+  │                        │                              │
+  │                        │ [vérifie nonce == nonce émis]│
+  │                        │ [marque token used=true]     │
+  │                        │  {jwt: OAEP(jwt, agent_pubkey)}
+  │                        │─────────────────────────────>│
+```
+
+### Tâches Phase 10
+
+| # | Tâche | Owner | Status | Bloquée par |
+|---|-------|-------|--------|-------------|
+| #97 | Store — table `enrollment_tokens` : `token_hash`, `hostname_pattern` (regexp), `reusable` (0=one-shot/1=permanent), `use_count`, `last_used_at`, `expires_at` (nullable), `created_by` | dev-relay | pending | — |
+| #98 | Store — table `plugin_tokens` : `token_hash`, `description`, `role`, `allowed_ips` (CIDRs virgule), `allowed_hostname_pattern` (regexp), `expires_at`, `last_used_at`, `revoked` | dev-relay | pending | — |
+| #99 | Server — refactorer `RegisterAgent` : accepter `enrollment_token`, valider (non expiré, `reusable=0` → `use_count==0`, regexp hostname), challenge-response OAEP nonce, incrémenter `use_count` + `last_used_at` | dev-relay | pending | #97 |
+| #100 | Server — endpoints admin tokens : `POST /api/admin/tokens` (create, champs `reusable`, `expires_at` nullable), `GET /api/admin/tokens` (list + filtre role), `POST /api/admin/tokens/:id/revoke`, `DELETE /api/admin/tokens/:id`, `POST /api/admin/tokens/purge?expired=1&used=1` | dev-relay | pending | #97, #98 |
+| #101 | Server — vérification plugin token : CIDR matching multi-valeurs (`net.ParseCIDR` pour chaque CIDR), regexp matching `allowed_hostname_pattern` sur header `X-Relay-Client-Host` | dev-relay | pending | #98 |
+| #102 | Agent — passer `RELAY_ENROLLMENT_TOKEN` (env var) dans POST /api/register + gérer le challenge-response (déchiffre nonce OAEP, répond `OAEP(nonce+token, server_pubkey)`) | dev-agent | pending | #99 |
+| #103 | CLI — `tokens create --role enrollment --hostname-pattern "vp.*" [--reusable] [--expires 30d]` / `--role plugin --allowed-ips "10.0.0.0/8" --allowed-hostname-pattern "ansible-.*"` ; `tokens list [--role ...]` (affiche MODE one-shot/permanent + USAGES) ; `tokens revoke/delete <id>` ; `tokens purge --expired --used` | dev-relay | pending | #100 |
+| #104 | Tests GO — one-shot (consommé après 1 usage, rejeté au 2ème), permanent (N usages, use_count incrémenté), regexp match/no-match, token expiré, token permanent sans expiry, CIDR multi-valeurs, plugin token CIDR + regexp | test-writer | pending | #99, #100, #101, #102, #103 |
+| #105 | QA — `go test ./...` 0 fail + smoke test enrollment complet depuis container | qa | pending | #104 |
+| #106 | Deploy qualif Phase 10 — ré-enrollment des 3 agents avec enrollment tokens sur 192.168.1.218, token `hostname_pattern = "qualif-host-[0-9]+"` | deploy-qualif | pending | #105 |
+
+**Validation Phase 10** :
+- ✓ TOUTES tâches #97-#106 completed
+- ✓ `enrollment_tokens` : one-shot ET permanent, TTL optionnel, `hostname_pattern` regexp
+- ✓ One-shot : rejeté au 2ème usage, `use_count` tracé
+- ✓ Permanent : N enrollements successifs, `use_count` incrémenté à chaque fois
+- ✓ Challenge-response OAEP : token volé sans keypair → challenge échoue
+- ✓ `plugin_tokens` : CIDR multi-valeurs + `allowed_hostname_pattern` regexp
+- ✓ Agents existants ré-enrôlés via enrollment tokens (migration authorized_keys)
+- ✓ CLI : `tokens create/list/revoke/delete/purge` opérationnels avec regexp et CIDR
+- ✓ `RELAY_ENROLLMENT_TOKEN` env var documentée dans le service systemd
+- ✓ qa : 0 test en échec
+- ✓ deploy-qualif : 3 agents enrôlés via tokens, 0 régression
+
+---
+
 ## Dépendances critiques
 
 ```
@@ -439,6 +524,11 @@ PHASE 8 (AGENT REWRITE GO):
 PHASE 9 (PLUGINS WRAPPER GO):
 #91 (GO agent done) → #92 (inventory wrapper) + #94 (exec wrapper - parallèle)
 #92/#94 → #95 (tests + integration) → #96 (E2E playbook)
+
+PHASE 10 (ENROLLMENT TOKEN SECURITY):
+#97 (enrollment_tokens table) → #99 (RegisterAgent + regexp matching) → #102 (agent challenge-response)
+#98 (plugin_tokens table) → #101 (CIDR + regexp plugin verification) → #100 (admin token endpoints) → #103 (CLI tokens)
+#99 + #100 + #101 + #102 + #103 → #104 (tests) → #105 (QA) → #106 (deploy qualif)
 ```
 
 ---
@@ -493,5 +583,6 @@ PHASE 9 (PLUGINS WRAPPER GO):
 | Phase 6 | CLI opérationnelle : minions list/detail/revoke/delete, inventory edit/diff/rollback | 🆕 À FAIRE |
 | Phase 7 | GO server : p95 latency < 10ms, memory < 10MB, 1000+ req/s, API 100% compatible | 🆕 À FAIRE |
 | Phase 8 | GO agent : memory < 3MB, startup < 50ms, systemd service, backward-compatible | 🆕 À FAIRE |
-| Phase 9 | GO wrappers : inventory refresh < 500ms, exec < 1s, Ansible plugins unchanged | 🆕 À FAIRE |
-| LIVE | Production Kubernetes optimisée GO : SLA garantis, performance, CLI management | 🆕 À FAIRE |
+| Phase 9 | GO wrappers : inventory refresh < 500ms, exec < 1s, Ansible plugins unchanged | ✅ COMPLÈTE |
+| Phase 10 | Enrollment token single-use + challenge-response OAEP + hostname_pattern regexp + CIDR multi-valeurs | 🆕 À FAIRE |
+| LIVE | Production Kubernetes optimisée GO : SLA garantis, performance, CLI management | ⏸ SUSPENDU |
