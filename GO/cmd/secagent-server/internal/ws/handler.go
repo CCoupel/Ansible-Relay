@@ -82,9 +82,10 @@ var (
 	RekeyFunc func(hostname string) bool
 
 	// DispatchFunc is called when an agent connects (host.up) or disconnects (host.down).
-	// Injected from main.go at startup to avoid an import cycle between ws and webhooks.
-	// nil = no webhook dispatch (tests, degraded mode).
-	DispatchFunc func(event string, hostname string, status string)
+	// Injected from main.go at startup to avoid an import cycle between ws and hooks.
+	// Signature: (event, hostname, status, enrolledAt) — enrolledAt is always "" here.
+	// nil = no dispatch (tests, degraded mode).
+	DispatchFunc func(event string, hostname string, status string, enrolledAt string)
 )
 
 // SetRekeyFunc injects the function used to issue a new encrypted token to an agent.
@@ -118,7 +119,7 @@ func RegisterConnection(hostname string, conn *AgentConnection) {
 	log.Printf("Agent connected: hostname=%s", hostname)
 
 	if DispatchFunc != nil {
-		go DispatchFunc("host.up", hostname, "connected")
+		go DispatchFunc("host.up", hostname, "connected", "")
 	}
 }
 
@@ -131,7 +132,7 @@ func UnregisterConnection(hostname string) {
 	log.Printf("Agent disconnected: hostname=%s", hostname)
 
 	if DispatchFunc != nil {
-		go DispatchFunc("host.down", hostname, "disconnected")
+		go DispatchFunc("host.down", hostname, "disconnected", "")
 	}
 
 	// Resolve all pending futures with error

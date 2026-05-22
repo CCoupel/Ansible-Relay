@@ -21,8 +21,8 @@ import (
 	"github.com/google/uuid"
 
 	"secagent-server/cmd/secagent-server/internal/crypto"
+	"secagent-server/cmd/secagent-server/internal/hooks"
 	"secagent-server/cmd/secagent-server/internal/storage"
-	"secagent-server/cmd/secagent-server/internal/webhooks"
 )
 
 // RegisterRequest represents agent enrollment request.
@@ -586,17 +586,9 @@ func registerAgentWithToken(w http.ResponseWriter, r *http.Request, ctx context.
 		log.Printf("RegisterAgent enrollment complete: hostname=%s token_id=%s", req.Hostname, tok.ID)
 
 		// Dispatch host.new event (async, nil-safe during tests)
-		if webhooks.GlobalDispatcher != nil {
+		if hooks.GlobalDispatcher != nil {
 			enrolledAt := time.Now().UTC().Format(time.RFC3339)
-			webhooks.GlobalDispatcher.Dispatch(webhooks.EventHostNew, webhooks.EventPayload{
-				Event:     string(webhooks.EventHostNew),
-				Timestamp: enrolledAt,
-				Host: webhooks.HostInfo{
-					Hostname:   req.Hostname,
-					Status:     "disconnected",
-					EnrolledAt: enrolledAt,
-				},
-			})
+			hooks.GlobalDispatcher.Dispatch("host.new", req.Hostname, "disconnected", enrolledAt)
 		}
 
 		w.Header().Set("Content-Type", "application/json")

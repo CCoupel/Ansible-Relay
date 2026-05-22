@@ -116,33 +116,20 @@ CREATE TABLE IF NOT EXISTS plugin_tokens (
 
 CREATE INDEX IF NOT EXISTS idx_plugin_tokens_hash ON plugin_tokens (token_hash);
 
-CREATE TABLE IF NOT EXISTS webhooks (
+CREATE TABLE IF NOT EXISTS action_log (
     id              TEXT PRIMARY KEY,
-    url             TEXT NOT NULL,
-    events          TEXT NOT NULL,
-    secret          TEXT,
-    max_retries     INTEGER NOT NULL DEFAULT 3,
-    timeout_seconds INTEGER NOT NULL DEFAULT 10,
-    enabled         INTEGER NOT NULL DEFAULT 1,
-    created_at      INTEGER NOT NULL,
-    description     TEXT
+    event           TEXT NOT NULL,
+    hostname        TEXT NOT NULL,
+    action_type     TEXT NOT NULL,
+    action_index    INTEGER NOT NULL,
+    config_snapshot TEXT NOT NULL,
+    success         INTEGER NOT NULL DEFAULT 0,
+    error           TEXT,
+    duration_ms     INTEGER,
+    executed_at     INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_webhooks_enabled ON webhooks (enabled);
-
-CREATE TABLE IF NOT EXISTS webhook_deliveries (
-    id            TEXT PRIMARY KEY,
-    webhook_id    TEXT NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
-    event         TEXT NOT NULL,
-    payload       TEXT NOT NULL,
-    attempt       INTEGER NOT NULL DEFAULT 1,
-    status_code   INTEGER,
-    success       INTEGER NOT NULL DEFAULT 0,
-    error         TEXT,
-    attempted_at  INTEGER NOT NULL,
-    duration_ms   INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_webhook
-    ON webhook_deliveries (webhook_id, attempted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_action_log_hostname ON action_log (hostname, executed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_action_log_event    ON action_log (event,    executed_at DESC);
 `
 
 // NewStore creates a new SQLite store and opens the connection

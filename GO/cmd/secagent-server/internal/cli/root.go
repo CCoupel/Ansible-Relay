@@ -32,6 +32,7 @@ func init() {
 		inventoryCmd,
 		serverCmd,
 		tokensCmd,
+		hooksCmd,
 	)
 }
 

@@ -14,8 +14,8 @@ import (
 	"secagent-server/cmd/secagent-server/internal/broker"
 	"secagent-server/cmd/secagent-server/internal/cli"
 	"secagent-server/cmd/secagent-server/internal/handlers"
+	"secagent-server/cmd/secagent-server/internal/hooks"
 	"secagent-server/cmd/secagent-server/internal/storage"
-	"secagent-server/cmd/secagent-server/internal/webhooks"
 	"secagent-server/cmd/secagent-server/internal/ws"
 )
 
@@ -35,7 +35,7 @@ func isCLIMode() bool {
 	}
 	// Known CLI top-level commands
 	switch first {
-	case "minions", "security", "inventory", "server", "tokens", "help", "completion":
+	case "minions", "security", "inventory", "server", "tokens", "hooks", "help", "completion":
 		return true
 	}
 	return false
@@ -123,22 +123,28 @@ func main() {
 		return natsClient != nil && natsClient.IsConnected()
 	}
 
-	// Initialize webhook dispatcher (async event delivery)
+	// Initialize hooks dispatcher (async event delivery)
 	dispatchCtx, dispatchCancel := context.WithCancel(context.Background())
 	defer dispatchCancel()
-	dispatcher := webhooks.NewDispatcher(store, 1000)
+	dispatcher := hooks.NewDispatcher(store, 1000)
 	dispatcher.Start(dispatchCtx)
-	webhooks.GlobalDispatcher = dispatcher
+	hooks.GlobalDispatcher = dispatcher
 
-	// Wire DispatchFunc into ws package (avoids import cycle ws→webhooks)
-	ws.DispatchFunc = func(event, hostname, status string) {
-		dispatcher.Dispatch(webhooks.EventType(event), webhooks.EventPayload{
-			Event:     event,
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
-			Host:      webhooks.HostInfo{Hostname: hostname, Status: status},
-		})
+	// Load initial hooks config (absent file is not an error)
+	hooksConfigPath := hooks.ConfigPath()
+	if initialCfg, err := hooks.LoadConfig(hooksConfigPath); err != nil {
+		log.Printf("[WARN] hooks config parse error (%s): %v — hooks disabled", hooksConfigPath, err)
+	} else if initialCfg == nil {
+		log.Printf("[INFO] hooks config not found at %s — 0 hooks active", hooksConfigPath)
+	} else {
+		dispatcher.SetConfig(initialCfg)
 	}
-	log.Println("[OK] Webhook dispatcher started")
+
+	// Wire DispatchFunc into ws package (avoids import cycle ws→hooks)
+	ws.DispatchFunc = func(event, hostname, status, enrolledAt string) {
+		dispatcher.Dispatch(event, hostname, status, enrolledAt)
+	}
+	log.Println("[OK] Hooks dispatcher started")
 
 	// Create routers
 	apiRouter := http.NewServeMux()
@@ -196,15 +202,11 @@ func main() {
 	adminRouter.HandleFunc("GET /api/admin/status", handlers.AdminStatus)
 	adminRouter.HandleFunc("GET /api/admin/stats", handlers.AdminStats)
 
-	// Webhooks CRUD (Phase 11)
-	adminRouter.HandleFunc("POST /api/admin/webhooks", handlers.AdminCreateWebhook)
-	adminRouter.HandleFunc("GET /api/admin/webhooks", handlers.AdminListWebhooks)
-	adminRouter.HandleFunc("GET /api/admin/webhooks/{id}", handlers.AdminGetWebhook)
-	adminRouter.HandleFunc("DELETE /api/admin/webhooks/{id}", handlers.AdminDeleteWebhook)
-	adminRouter.HandleFunc("GET /api/admin/webhooks/{id}/deliveries", handlers.AdminListDeliveries)
-
-	// Agent deletion (distinct from revoke — supprime la DB row)
+	// Agent deletion (distinct from revoke — removes the DB row)
 	adminRouter.HandleFunc("DELETE /api/admin/minions/{hostname}", handlers.AdminDeleteMinion)
+
+	// Hooks execution log (Phase 11 revised)
+	adminRouter.HandleFunc("GET /api/admin/hooks/log", handlers.AdminHooksLog)
 
 	// === PORT 7772: WEBSOCKET ===
 	wsRouter.HandleFunc("/ws/agent", ws.AgentHandler)
@@ -263,6 +265,21 @@ func main() {
 	}
 	log.Println("[OK] All servers running")
 	log.Println("[OK] Ansible-SecAgent GO Server ready")
+
+	// SIGHUP → hot-reload hooks config
+	sighupChan := make(chan os.Signal, 1)
+	signal.Notify(sighupChan, syscall.SIGHUP)
+	go func() {
+		for range sighupChan {
+			log.Println("[HOOKS] SIGHUP received — reloading hooks config")
+			cfg, err := hooks.LoadConfig(hooksConfigPath)
+			if err != nil {
+				log.Printf("[WARN] hooks config reload error: %v — keeping previous config", err)
+			} else {
+				dispatcher.SetConfig(cfg)
+			}
+		}
+	}()
 
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)

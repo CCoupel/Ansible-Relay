@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"secagent-server/cmd/secagent-server/internal/hooks"
 	"secagent-server/cmd/secagent-server/internal/storage"
-	"secagent-server/cmd/secagent-server/internal/webhooks"
 	"secagent-server/cmd/secagent-server/internal/ws"
 )
 
@@ -482,12 +483,8 @@ func AdminRevokeMinion(w http.ResponseWriter, r *http.Request) {
 	_ = adminStore.UpdateAgentStatus(ctx, hostname, "disconnected", "")
 
 	// Dispatch host.revoked event (async, nil-safe during tests)
-	if webhooks.GlobalDispatcher != nil {
-		webhooks.GlobalDispatcher.Dispatch(webhooks.EventHostRevoked, webhooks.EventPayload{
-			Event:     string(webhooks.EventHostRevoked),
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
-			Host:      webhooks.HostInfo{Hostname: hostname, Status: "revoked"},
-		})
+	if hooks.GlobalDispatcher != nil {
+		hooks.GlobalDispatcher.Dispatch("host.revoked", hostname, "revoked", "")
 	}
 
 	log.Printf("Minion revoked: hostname=%s ws_disconnected=%v", hostname, wsDisconnected)
@@ -561,4 +558,141 @@ func AdminStats(w http.ResponseWriter, r *http.Request) {
 		"agents_total":     agentsTotal,
 		"tasks_active":     ws.GetPendingTaskCount(),
 	})
+}
+
+// ========================================================================
+// DELETE /api/admin/minions/{hostname}
+// ========================================================================
+
+// AdminDeleteMinion permanently removes an agent from the DB.
+// Closes the WS connection (code 4000) if active, then dispatches host.deleted.
+// Distinct from POST /api/admin/revoke/{hostname} which blacklists but does not delete.
+func AdminDeleteMinion(w http.ResponseWriter, r *http.Request) {
+	if !requireAdminAuth(w, r) {
+		return
+	}
+
+	hostname := r.PathValue("hostname")
+	if hostname == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_hostname"})
+		return
+	}
+	if adminStore == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store_not_initialized"})
+		return
+	}
+
+	ctx := r.Context()
+
+	// Verify agent exists
+	agent, err := adminStore.GetAgent(ctx, hostname)
+	if err != nil {
+		log.Printf("AdminDeleteMinion GetAgent: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_error"})
+		return
+	}
+	if agent == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent_not_found"})
+		return
+	}
+
+	// Close active WS connection with code 4000 (normal close)
+	wsDisconnected := ws.CloseAgent(hostname, ws.WSCloseNormal, "admin_delete")
+
+	// Delete from DB (agents + authorized_keys best-effort)
+	deleted, err := adminStore.DeleteAgent(ctx, hostname)
+	if err != nil {
+		log.Printf("AdminDeleteMinion DeleteAgent: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_error"})
+		return
+	}
+	if !deleted {
+		// Race: another request deleted it between GetAgent and DeleteAgent
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent_not_found"})
+		return
+	}
+
+	// Dispatch host.deleted event (async, nil-safe during tests)
+	if hooks.GlobalDispatcher != nil {
+		hooks.GlobalDispatcher.Dispatch("host.deleted", hostname, "deleted", "")
+	}
+
+	log.Printf("Minion deleted: hostname=%s ws_disconnected=%v", hostname, wsDisconnected)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"hostname":        hostname,
+		"status":          "deleted",
+		"ws_disconnected": wsDisconnected,
+	})
+}
+
+// ========================================================================
+// GET /api/admin/hooks/log
+// ========================================================================
+
+// AdminHooksLog returns action_log entries with optional filters.
+// Query params: limit (1–200, default 50), event, hostname.
+func AdminHooksLog(w http.ResponseWriter, r *http.Request) {
+	if !requireAdminAuth(w, r) {
+		return
+	}
+	if adminStore == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store_not_initialized"})
+		return
+	}
+
+	limit := 50
+	if lStr := r.URL.Query().Get("limit"); lStr != "" {
+		n, err := strconv.Atoi(lStr)
+		if err != nil || n < 1 || n > 200 {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"error":  "invalid_limit",
+				"detail": "must be between 1 and 200",
+			})
+			return
+		}
+		limit = n
+	}
+
+	filter := storage.ActionLogFilter{
+		Event:    r.URL.Query().Get("event"),
+		Hostname: r.URL.Query().Get("hostname"),
+		Limit:    limit,
+	}
+
+	entries, err := adminStore.ListActionLogs(r.Context(), filter)
+	if err != nil {
+		log.Printf("AdminHooksLog: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "db_error"})
+		return
+	}
+
+	type logEntry struct {
+		ID             string `json:"id"`
+		Event          string `json:"event"`
+		Hostname       string `json:"hostname"`
+		ActionType     string `json:"action_type"`
+		ActionIndex    int    `json:"action_index"`
+		ConfigSnapshot string `json:"config_snapshot"`
+		Success        bool   `json:"success"`
+		Error          string `json:"error"`
+		DurationMs     int64  `json:"duration_ms"`
+		ExecutedAt     string `json:"executed_at"`
+	}
+
+	result := make([]logEntry, 0, len(entries))
+	for _, e := range entries {
+		result = append(result, logEntry{
+			ID:             e.ID,
+			Event:          e.Event,
+			Hostname:       e.Hostname,
+			ActionType:     e.ActionType,
+			ActionIndex:    e.ActionIndex,
+			ConfigSnapshot: e.ConfigSnapshot,
+			Success:        e.Success,
+			Error:          e.Error,
+			DurationMs:     e.DurationMs,
+			ExecutedAt:     e.ExecutedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, result)
 }
