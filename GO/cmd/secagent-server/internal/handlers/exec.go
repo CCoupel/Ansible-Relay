@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,8 +12,17 @@ import (
 
 	"github.com/google/uuid"
 
+	"secagent-server/cmd/secagent-server/internal/proxy"
 	"secagent-server/cmd/secagent-server/internal/ws"
 )
+
+// proxyRouter is injected from main.go when PROXY_MODE is enabled.
+// When non-nil, exec/upload/fetch operations check relay_routing before local agents.
+var proxyRouter *proxy.ProxyRouter
+
+// SetProxyRouter injects a ProxyRouter for relay task routing.
+// Called from main.go when PROXY_MODE=true.
+func SetProxyRouter(r *proxy.ProxyRouter) { proxyRouter = r }
 
 // ExecRequest represents a command execution request
 type ExecRequest struct {
@@ -197,16 +207,53 @@ func ExecCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify agent is connected via live WS registry
-	if err := checkAgentOnline(hostname); err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "agent_offline"})
-		return
-	}
-
 	// Generate or use provided task ID
 	taskID := req.TaskID
 	if taskID == nil || *taskID == "" {
 		taskID = pointerString(newTaskID())
+	}
+
+	// Proxy mode: check if hostname is on a remote relay BEFORE checking local WS
+	if proxyRouter != nil {
+		relayID, relayErr := proxyRouter.GetRelayForHostname(hostname)
+		if relayErr == nil {
+			// Hostname is managed by a downstream relay — route via proxy
+			logExecSafe(hostname, *taskID, &req)
+			proxyReq := proxy.ExecRequest{
+				Cmd:          req.Cmd,
+				Timeout:      req.Timeout,
+				Become:       req.Become,
+				BecomeMethod: req.BecomeMethod,
+				TaskID:       *taskID,
+			}
+			if req.Stdin != nil {
+				proxyReq.Stdin = *req.Stdin
+			}
+			resp, pErr := proxyRouter.RouteExec(r.Context(), hostname, *taskID, proxyReq)
+			if pErr != nil {
+				writeProxyExecError(w, pErr, hostname, *taskID)
+				return
+			}
+			log.Printf("Proxy exec complete: hostname=%s relay_id=%s task_id=%s rc=%d",
+				hostname, relayID, *taskID, resp.RC)
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"rc":        resp.RC,
+				"stdout":    resp.Stdout,
+				"stderr":    resp.Stderr,
+				"truncated": resp.Truncated,
+			})
+			return
+		} else if !errors.Is(relayErr, proxy.ErrHostNotFound) {
+			// Real DB error — log but fall through to local agent
+			log.Printf("[PROXY] relay routing lookup error: hostname=%s err=%v", hostname, relayErr)
+		}
+		// ErrHostNotFound → fall through to local agent lookup below
+	}
+
+	// Verify agent is connected via live WS registry
+	if err := checkAgentOnline(hostname); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "agent_offline"})
+		return
 	}
 
 	logExecSafe(hostname, *taskID, &req)
@@ -287,16 +334,34 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify agent is connected (after validation)
-	if err := checkAgentOnline(hostname); err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "agent_offline"})
-		return
-	}
-
 	// Generate or use provided task ID
 	taskID := req.TaskID
 	if taskID == nil || *taskID == "" {
 		taskID = pointerString(newTaskID())
+	}
+
+	// Proxy mode: check relay routing before local WS
+	if proxyRouter != nil {
+		relayID, relayErr := proxyRouter.GetRelayForHostname(hostname)
+		if relayErr == nil {
+			log.Printf("Upload request (proxy): hostname=%s relay_id=%s task_id=%s dest=%s size=%d",
+				hostname, relayID, *taskID, req.Dest, len(decoded))
+			proxyReq := proxy.UploadRequest{Dest: req.Dest, Data: req.Data, Mode: req.Mode}
+			if pErr := proxyRouter.RouteUpload(r.Context(), hostname, *taskID, proxyReq); pErr != nil {
+				writeProxyExecError(w, pErr, hostname, *taskID)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"rc": 0})
+			return
+		} else if !errors.Is(relayErr, proxy.ErrHostNotFound) {
+			log.Printf("[PROXY] relay routing lookup error: hostname=%s err=%v", hostname, relayErr)
+		}
+	}
+
+	// Verify agent is connected (after validation)
+	if err := checkAgentOnline(hostname); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "agent_offline"})
+		return
 	}
 
 	log.Printf("Upload request: hostname=%s task_id=%s dest=%s size=%d",
@@ -353,16 +418,35 @@ func FetchFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify agent is connected (after validation)
-	if err := checkAgentOnline(hostname); err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "agent_offline"})
-		return
-	}
-
 	// Generate or use provided task ID
 	taskID := req.TaskID
 	if taskID == nil || *taskID == "" {
 		taskID = pointerString(newTaskID())
+	}
+
+	// Proxy mode: check relay routing before local WS
+	if proxyRouter != nil {
+		relayID, relayErr := proxyRouter.GetRelayForHostname(hostname)
+		if relayErr == nil {
+			log.Printf("Fetch request (proxy): hostname=%s relay_id=%s task_id=%s src=%s",
+				hostname, relayID, *taskID, req.Src)
+			proxyReq := proxy.FetchRequest{Src: req.Src}
+			resp, pErr := proxyRouter.RouteFetch(r.Context(), hostname, *taskID, proxyReq)
+			if pErr != nil {
+				writeProxyExecError(w, pErr, hostname, *taskID)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"rc": resp.RC, "data": resp.Data})
+			return
+		} else if !errors.Is(relayErr, proxy.ErrHostNotFound) {
+			log.Printf("[PROXY] relay routing lookup error: hostname=%s err=%v", hostname, relayErr)
+		}
+	}
+
+	// Verify agent is connected (after validation)
+	if err := checkAgentOnline(hostname); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "agent_offline"})
+		return
 	}
 
 	log.Printf("Fetch request: hostname=%s task_id=%s src=%s",
@@ -398,6 +482,21 @@ func FetchFile(w http.ResponseWriter, r *http.Request) {
 		"rc":   result.RC,
 		"data": result.Data,
 	})
+}
+
+// writeProxyExecError writes the appropriate HTTP error for a proxy routing failure.
+func writeProxyExecError(w http.ResponseWriter, err error, hostname, taskID string) {
+	e := err.Error()
+	log.Printf("Proxy exec error: hostname=%s task_id=%s err=%s", hostname, taskID, e)
+	switch {
+	case strings.Contains(e, "timeout"):
+		writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "task_timeout"})
+	case strings.Contains(e, "relay_offline"), strings.Contains(e, "relay_disconnected"),
+		strings.Contains(e, "dispatch_failed"):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "relay_offline"})
+	default:
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": e})
+	}
 }
 
 // GET /api/async_status/{task_id} — Poll the status of an async task

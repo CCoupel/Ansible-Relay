@@ -16,6 +16,7 @@ import (
 	"secagent-server/cmd/secagent-server/internal/config"
 	"secagent-server/cmd/secagent-server/internal/handlers"
 	"secagent-server/cmd/secagent-server/internal/hooks"
+	"secagent-server/cmd/secagent-server/internal/proxy"
 	"secagent-server/cmd/secagent-server/internal/storage"
 	"secagent-server/cmd/secagent-server/internal/ws"
 )
@@ -97,8 +98,6 @@ func main() {
 	} else {
 		log.Printf("[INFO] mode=standalone — relay standard")
 	}
-	_ = proxyCfg // proxyCfg will be used by future proxy handlers (12.4–12.9)
-
 	// Initialize storage (SQLite)
 	log.Println("[INIT] Initializing SQLite database...")
 	var err error
@@ -114,6 +113,19 @@ func main() {
 
 	// Inject store into register/token handlers
 	handlers.SetRegisterStore(store)
+
+	// Proxy mode: initialize ProxyRouter (task routing) and PushManager (inventory sync)
+	if proxyCfg.Enabled {
+		proxyRouter := proxy.NewProxyRouter(store)
+		handlers.SetProxyRouter(proxyRouter)
+
+		pushMgr := proxy.NewPushManager(store, 0) // 0 → DefaultPollInterval (30s)
+		pushCtx, pushCancel := context.WithCancel(context.Background())
+		defer pushCancel()
+		go pushMgr.Start(pushCtx)
+
+		log.Printf("[PROXY] ProxyRouter initialized, PushManager started (poll=%s)", proxy.DefaultPollInterval)
+	}
 
 	// Load/generate RSA keypair and JWT secrets from DB (idempotent)
 	log.Println("[INIT] Loading server keys from DB...")
