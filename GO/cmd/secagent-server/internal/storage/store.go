@@ -131,6 +131,30 @@ CREATE TABLE IF NOT EXISTS action_log (
 );
 CREATE INDEX IF NOT EXISTS idx_action_log_hostname ON action_log (hostname, executed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_action_log_event    ON action_log (event,    executed_at DESC);
+
+-- Phase 12: Proxy/Gateway — relay node registry and hostname routing
+CREATE TABLE IF NOT EXISTS relay_nodes (
+    id          TEXT PRIMARY KEY,
+    relay_id    TEXT NOT NULL UNIQUE,
+    url         TEXT,
+    description TEXT,
+    token_hash  TEXT,
+    mode        TEXT NOT NULL DEFAULT 'pull',
+    is_proxy    INTEGER NOT NULL DEFAULT 0,
+    created_at  INTEGER NOT NULL,
+    last_seen   INTEGER,
+    status      TEXT NOT NULL DEFAULT 'disconnected'
+);
+CREATE INDEX IF NOT EXISTS idx_relay_nodes_relay_id ON relay_nodes (relay_id);
+CREATE INDEX IF NOT EXISTS idx_relay_nodes_status   ON relay_nodes (status);
+
+CREATE TABLE IF NOT EXISTS relay_routing (
+    hostname    TEXT PRIMARY KEY,
+    relay_id    TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    FOREIGN KEY (relay_id) REFERENCES relay_nodes(relay_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_relay_routing_relay_id ON relay_routing (relay_id);
 `
 
 // NewStore creates a new SQLite store and opens the connection

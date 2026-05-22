@@ -33,6 +33,20 @@ func New(secrets SecretsProvider, ttl time.Duration) *JWTService {
 // Sign creates a signed HS256 JWT for hostname with role "agent".
 // Returns (rawJWT, jti, error).
 func (s *JWTService) Sign(hostname string) (rawJWT, jti string, err error) {
+	return s.signWithRole(hostname, "agent", s.ttl)
+}
+
+// SignRelay creates a signed HS256 JWT for a relay node with role "relay".
+// The relay_id is stored in the "sub" claim.
+// Uses a 30-day TTL so relay tokens remain valid across short outages.
+// Returns (rawJWT, jti, error).
+func (s *JWTService) SignRelay(relayID string) (rawJWT, jti string, err error) {
+	return s.signWithRole(relayID, "relay", 720*time.Hour) // 30 days
+}
+
+// signWithRole is the shared implementation for Sign and SignRelay.
+// Returns (rawJWT, jti, error).
+func (s *JWTService) signWithRole(sub, role string, ttl time.Duration) (rawJWT, jti string, err error) {
 	current, _, _ := s.secrets()
 	if current == "" {
 		return "", "", fmt.Errorf("jwt_secret_not_configured")
@@ -41,11 +55,11 @@ func (s *JWTService) Sign(hostname string) (rawJWT, jti string, err error) {
 	jti = uuid.New().String()
 	now := time.Now()
 	claims := jwt.MapClaims{
-		"sub":  hostname,
-		"role": "agent",
+		"sub":  sub,
+		"role": role,
 		"jti":  jti,
 		"iat":  now.Unix(),
-		"exp":  now.Add(s.ttl).Unix(),
+		"exp":  now.Add(ttl).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

@@ -33,6 +33,7 @@ func init() {
 		serverCmd,
 		tokensCmd,
 		hooksCmd,
+		relaysCmd,
 	)
 }
 

@@ -276,3 +276,92 @@ func TestNew_CustomTTL(t *testing.T) {
 		t.Errorf("expected 2h TTL, got %s", svc.ttl)
 	}
 }
+
+// ── SignRelay ─────────────────────────────────────────────────────────────────
+
+func TestSignRelay_ProducesValidJWT(t *testing.T) {
+	svc := newSvc(singleKeyProvider("relay-secret"))
+	raw, jti, err := svc.SignRelay("dmz1")
+	if err != nil {
+		t.Fatalf("SignRelay: %v", err)
+	}
+	if raw == "" {
+		t.Error("expected non-empty JWT")
+	}
+	if jti == "" {
+		t.Error("expected non-empty JTI")
+	}
+}
+
+func TestSignRelay_RoleIsRelay(t *testing.T) {
+	svc := newSvc(singleKeyProvider("relay-secret"))
+	raw, _, err := svc.SignRelay("dmz1")
+	if err != nil {
+		t.Fatalf("SignRelay: %v", err)
+	}
+
+	claims, _, err := svc.Verify(raw)
+	if err != nil {
+		t.Fatalf("Verify relay token: %v", err)
+	}
+	role, _ := claims["role"].(string)
+	if role != "relay" {
+		t.Errorf("expected role=relay, got %q", role)
+	}
+}
+
+func TestSignRelay_SubIsRelayID(t *testing.T) {
+	svc := newSvc(singleKeyProvider("relay-secret"))
+	raw, _, err := svc.SignRelay("dmz1")
+	if err != nil {
+		t.Fatalf("SignRelay: %v", err)
+	}
+
+	claims, _, err := svc.Verify(raw)
+	if err != nil {
+		t.Fatalf("Verify relay token: %v", err)
+	}
+	sub, _ := claims["sub"].(string)
+	if sub != "dmz1" {
+		t.Errorf("expected sub=dmz1, got %q", sub)
+	}
+}
+
+func TestSignRelay_TokenNotValidAsAgent(t *testing.T) {
+	// A relay JWT must have role=relay, not role=agent.
+	// Verify the role is set correctly — callers like ws/relay_handler check role.
+	svc := newSvc(singleKeyProvider("relay-secret"))
+	raw, _, _ := svc.SignRelay("dmz1")
+
+	claims, _, err := svc.Verify(raw)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	role, _ := claims["role"].(string)
+	if role == "agent" {
+		t.Error("relay token must not have role=agent")
+	}
+}
+
+func TestSign_TokenNotValidAsRelay(t *testing.T) {
+	// An agent JWT (produced by Sign) must have role=agent, not role=relay.
+	svc := newSvc(singleKeyProvider("relay-secret"))
+	raw, _, _ := svc.Sign("host-1")
+
+	claims, _, err := svc.Verify(raw)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	role, _ := claims["role"].(string)
+	if role == "relay" {
+		t.Error("agent token must not have role=relay")
+	}
+}
+
+func TestSignRelay_EmptySecret_ReturnsError(t *testing.T) {
+	svc := newSvc(singleKeyProvider(""))
+	_, _, err := svc.SignRelay("dmz1")
+	if err == nil {
+		t.Error("expected error when secret is empty")
+	}
+}

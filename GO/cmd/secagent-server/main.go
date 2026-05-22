@@ -230,6 +230,12 @@ func main() {
 	// Hooks execution log (Phase 11 revised)
 	adminRouter.HandleFunc("GET /api/admin/hooks/log", handlers.AdminHooksLog)
 
+	// Relay nodes management (Phase 12 — proxy/gateway mode)
+	adminRouter.HandleFunc("POST /api/admin/relays", handlers.AdminCreateRelay)
+	adminRouter.HandleFunc("GET /api/admin/relays", handlers.AdminListRelays)
+	adminRouter.HandleFunc("GET /api/admin/relays/status", handlers.AdminRelaysStatus)
+	adminRouter.HandleFunc("DELETE /api/admin/relays/{id}", handlers.AdminDeleteRelay)
+
 	// === PORT 7772: WEBSOCKET ===
 	wsRouter.HandleFunc("/ws/agent", ws.AgentHandler)
 
