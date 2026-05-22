@@ -25,6 +25,7 @@ type HostVars struct {
 	AnsibleHost       string `json:"ansible_host"`
 	RelayStatus       string `json:"secagent_status"`
 	RelayLastSeen     string `json:"secagent_last_seen"`
+	RelayID           string `json:"secagent_relay_id,omitempty"` // proxy mode: relay that owns this host
 }
 
 // InventoryResponse represents the Ansible dynamic inventory format
@@ -76,6 +77,7 @@ func buildInventoryResponse(onlyConnected bool) InventoryResponse {
 		log.Printf("buildInventoryResponse: ListAgents error: %v", err)
 		return response
 	}
+	seenHosts := make(map[string]bool, len(agents))
 	for _, agent := range agents {
 		isConnected := connectedSet[agent.Hostname]
 
@@ -84,6 +86,7 @@ func buildInventoryResponse(onlyConnected bool) InventoryResponse {
 			continue
 		}
 
+		seenHosts[agent.Hostname] = true
 		response.All.Hosts = append(response.All.Hosts, agent.Hostname)
 		status := "disconnected"
 		if isConnected {
@@ -96,8 +99,41 @@ func buildInventoryResponse(onlyConnected bool) InventoryResponse {
 			RelayLastSeen:     now,
 		}
 	}
+
+	// Proxy mode: aggregate agents from downstream relays via relay_routing table.
+	// Local agents take precedence (already in seenHosts); relay agents add the relay_id field.
+	if proxyRouter != nil {
+		relayEntries, rErr := proxyRouter.AggregateRelayInventory()
+		if rErr != nil {
+			log.Printf("buildInventoryResponse: AggregateRelayInventory error: %v", rErr)
+		} else {
+			for _, entry := range relayEntries {
+				if seenHosts[entry.Hostname] {
+					continue // local agent takes precedence
+				}
+				if onlyConnected && entry.RelayStatus != "connected" {
+					continue
+				}
+				seenHosts[entry.Hostname] = true
+				response.All.Hosts = append(response.All.Hosts, entry.Hostname)
+				lastSeen := now
+				if entry.LastSeen > 0 {
+					lastSeen = time.Unix(entry.LastSeen, 0).UTC().Format(time.RFC3339)
+				}
+				response.Meta.Hostvars[entry.Hostname] = HostVars{
+					AnsibleConnection: "relay",
+					AnsibleHost:       entry.Hostname,
+					RelayStatus:       entry.RelayStatus,
+					RelayLastSeen:     lastSeen,
+					RelayID:           entry.RelayID,
+				}
+			}
+		}
+	}
+
 	return response
 }
+
 
 // parseOnlyConnected reads the only_connected query parameter (default false).
 func parseOnlyConnected(r *http.Request) bool {
