@@ -298,3 +298,166 @@ secagent-server server stats
 | `RELAY_PLUGIN_TOKEN` | ✅ | Token statique pour les plugins Ansible |
 | `SERVER_ADDR` | — | Adresse d'écoute (défaut `:7770`) |
 | `TLS_CERT` / `TLS_KEY` | — | Certificats TLS directs (sinon Caddy) |
+| `PROXY_MODE` | — | `true` pour activer le mode proxy/gateway multi-zone |
+| `PROXY_INVENTORY_POLL_INTERVAL` | — | Intervalle poll inventaire mode push (défaut `30s`) |
+
+---
+
+## 9. Mode Proxy/Gateway — Phase 12
+
+> Architecture complète : `DOC/common/ARCHITECTURE.md` §23
+
+### 9.1 Activation
+
+```bash
+PROXY_MODE=true secagent-server   # mode proxy
+# ou
+secagent-server                   # mode relay standard (pas de changement)
+```
+
+En mode proxy, le serveur accepte les connexions relay sur `WSS /ws/relay` et expose les endpoints admin de gestion des relays.
+
+---
+
+### 9.2 WebSocket `/ws/relay` — Mode pull
+
+```
+WSS /ws/relay
+Authorization: Bearer <JWT rôle="relay">
+Port : 7772 (et 7770 pour compat)
+```
+
+#### Messages Relay → Proxy
+
+| Type | Champs | Description |
+|---|---|---|
+| `relay_hello` | `relay_id`, `version`, `is_proxy`, `node_type` | Handshake initial |
+| `agent_list` | `agents[]` (`hostname`, `status`, `last_seen`) | Snapshot des agents |
+| `task_result` | `task_id`, `rc`, `stdout`, `stderr`, `truncated` | Résultat exec |
+| `upload_result` | `task_id`, `rc` | Résultat upload |
+| `fetch_result` | `task_id`, `rc`, `data` | Résultat fetch (base64) |
+
+#### Messages Proxy → Relay
+
+| Type | Champs | Description |
+|---|---|---|
+| `relay_ack` | `relay_id`, `status`, `timestamp` | Ack handshake |
+| `agent_list_ack` | `relay_id`, `count` | Ack agent_list |
+| `task_dispatch` | `task_id`, `hostname`, `cmd`, `stdin`, `timeout`, `become`, `become_method` | Dispatch exec |
+| `file_upload` | `task_id`, `hostname`, `dest`, `data`, `mode` | Upload fichier |
+| `file_fetch` | `task_id`, `hostname`, `src` | Fetch fichier |
+| `task_cancel` | `task_id`, `hostname` | Annulation |
+
+#### Codes fermeture WS relay
+
+| Code | Signification |
+|---|---|
+| `4010` | Token relay révoqué |
+| `4011` | Token relay expiré |
+| `4000` | Fermeture normale |
+
+---
+
+### 9.3 Nouveaux endpoints admin (port 7771)
+
+#### Gestion des relays
+
+```
+# Enregistrer un relay en mode push
+POST /api/admin/relays
+{ "relay_id": "dmz1", "url": "https://dmz1.example.com:7770",
+  "description": "Zone DMZ1", "token": "secagent_relay_..." }
+→ 201 { "id": "uuid", "relay_id": "dmz1", "mode": "push", "status": "pending" }
+
+# Lister les relays configurés
+GET /api/admin/relays
+→ 200 { "relays": [ { "id": "...", "relay_id": "dmz1", "mode": "push|pull",
+                       "connected": true, "agent_count": 5, "last_seen": "..." } ] }
+
+# Supprimer un relay configuré (mode push)
+DELETE /api/admin/relays/{id}
+→ 204
+
+# Statut temps réel des relays
+GET /api/admin/relays/status
+→ 200 { "relays": [ { "relay_id": "dmz1", "mode": "pull",
+                       "connected": true, "agent_count": 3,
+                       "is_proxy": false, "last_seen": "..." } ] }
+```
+
+#### CLI associée
+
+```bash
+secagent-server relays list [--format table|json|yaml]
+secagent-server relays get <relay_id>
+secagent-server relays status
+secagent-server relays add --id <relay_id> --url <url> --token <tok> [--description <desc>]
+secagent-server relays remove <relay_id>
+```
+
+---
+
+### 9.4 Rôle JWT `relay`
+
+Nouveau rôle distinct de `agent`, `plugin`, `admin` :
+
+```json
+{ "sub": "dmz1", "role": "relay", "jti": "uuid", "iat": ..., "exp": ... }
+```
+
+Créé via `POST /api/admin/tokens` avec `"role": "relay"`.
+
+Permissions :
+- Peut ouvrir `WSS /ws/relay` uniquement
+- Ne peut **pas** ouvrir `/ws/agent`, accéder à `/api/exec`, `/api/inventory`
+
+---
+
+### 9.5 Inventaire agrégé
+
+`GET /api/inventory` en mode proxy retourne l'union de tous les relays.
+Les hostvars incluent le champ `secagent_relay_id` :
+
+```json
+{
+  "host-A": {
+    "ansible_connection": "relay",
+    "ansible_host": "host-A",
+    "secagent_status": "connected",
+    "secagent_last_seen": "2026-05-22T15:00:00Z",
+    "secagent_relay_id": "dmz1"
+  }
+}
+```
+
+---
+
+### 9.6 Nouvelles tables SQLite
+
+```sql
+CREATE TABLE IF NOT EXISTS relay_nodes (
+    id          TEXT PRIMARY KEY,
+    relay_id    TEXT NOT NULL UNIQUE,
+    url         TEXT,
+    description TEXT,
+    token_hash  TEXT,
+    mode        TEXT NOT NULL DEFAULT 'pull',
+    is_proxy    INTEGER NOT NULL DEFAULT 0,
+    created_at  INTEGER NOT NULL,
+    last_seen   INTEGER,
+    status      TEXT NOT NULL DEFAULT 'pending'
+);
+
+CREATE TABLE IF NOT EXISTS relay_routing (
+    hostname    TEXT PRIMARY KEY,
+    relay_id    TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+```
+
+---
+
+### 9.7 Protection anti-boucle (chaînage proxy→proxy)
+
+L'en-tête HTTP `X-Relay-Hops` (valeur initiale : `8`) est transmis à chaque nœud proxy.
+Chaque proxy décrémente la valeur avant de transmettre. Un proxy recevant `X-Relay-Hops: 0` retourne HTTP 508 Loop Detected.

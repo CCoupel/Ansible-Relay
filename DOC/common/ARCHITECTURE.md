@@ -28,6 +28,9 @@
 18. [Déploiement — secagent-minion (systemd)](#18-déploiement--secagent-minion-systemd)
 19. [Déploiement — relay server (Compose / Kubernetes)](#19-déploiement--secagent-server-compose--kubernetes)
 20. [Persistance des données](#20-persistance-des-données)
+21. [CLI de Management — secagent-server en mode CLI](#21-cli-de-management--secagent-server-en-mode-cli)
+22. [Rotation des clefs — Période de recouvrement](#22-rotation-des-clefs--période-de-recouvrement)
+23. [Mode Proxy/Gateway multi-zone](#23-mode-proxygateaway-multi-zone)
 
 ---
 
@@ -1706,3 +1709,289 @@ Si le serveur rejette la connexion WS avec HTTP 401 (JWT expiré ou révoqué ap
 *Document généré le 2026-03-03 — Session de brainstorming architecture Ansible-SecAgent*
 *Mise à jour v1.1 : déploiement systemd / Docker Compose / Kubernetes, persistance des données*
 *Mise à jour v1.2 : CLI management (§21), rotation des clefs avec période de recouvrement (§22)*
+*Mise à jour v2.0 : Mode Proxy/Gateway multi-zone (§23) — Phase 12*
+
+---
+
+## 23. Mode Proxy/Gateway multi-zone
+
+### Vue d'ensemble
+
+Le mode proxy/gateway permet d'agréger plusieurs zones réseau (DMZ, clusters…) derrière un point d'entrée unique tout en conservant les agents dans chaque zone isolée.
+
+```
+[Ansible Control Node]
+        │
+[Plugin connexion/inventaire]  — REST HTTPS
+        │
+ ┌──────▼──────────────────────────────────────┐
+ │       PROXY / GATEWAY                        │
+ │  (secagent-server --proxy ou PROXY_MODE=true)│
+ │  Ports : 7770 (API) · 7771 (admin) · 7772 (WS)│
+ └───────┬──────────────────────┬───────────────┘
+         │ WSS /ws/relay        │ REST (mode push)
+  ┌──────▼──────┐        ┌──────▼──────┐
+  │ Relay DMZ1  │        │ Relay DMZ2  │
+  │ (mode pull) │        │ (mode push) │
+  └──────┬──────┘        └──────┬──────┘
+         │ WSS /ws/agent        │ WSS /ws/agent
+   [host-A] [host-B]      [host-C] [host-D]
+```
+
+**Principe :** le même binaire `secagent-server` fonctionne en mode proxy via la variable d'environnement `PROXY_MODE=true`. Le proxy est transparent pour les plugins Ansible — les endpoints REST existants (`/api/inventory`, `/api/exec/{host}`, etc.) fonctionnent identiquement.
+
+---
+
+### 23.1 Modes de connexion proxy↔relay
+
+#### Mode pull (relays → proxy)
+
+Les relays initient la connexion vers le proxy, symétrique au modèle agent→relay.
+
+```
+[Relay DMZ1]
+  → WSS /ws/relay (port 7772 du proxy)
+  → Authorization: Bearer <JWT rôle="relay">
+  → relay_hello { relay_id: "dmz1", version: "1.0", is_proxy: false }
+  → agent_list  { agents: [{ hostname: "host-A", status: "connected" }, ...] }
+  ← relay_ack   { status: "ok" }
+  ← agent_list_ack { count: 2 }
+```
+
+#### Mode push (proxy → relays)
+
+Le proxy initie des connexions HTTP REST vers des relays configurés en base de données.
+Le proxy appelle les endpoints REST existants du relay (`GET /api/inventory`, `POST /api/exec/{host}`, etc.) directement.
+
+```
+[Proxy]
+  → GET  https://dmz2.example.com:7770/api/inventory   (toutes les 30s)
+  → POST https://dmz2.example.com:7770/api/exec/{host}  (à la demande)
+  Authorization: Bearer <token relay configuré en DB>
+```
+
+---
+
+### 23.2 Protocole WebSocket /ws/relay
+
+#### Endpoint
+
+```
+WSS /ws/relay
+Authorization: Bearer <JWT rôle="relay">
+Port : 7772 (et 7770 pour compatibilité)
+```
+
+#### Types de messages
+
+**Relay → Proxy :**
+
+| Type | Description | Champs clés |
+|---|---|---|
+| `relay_hello` | Handshake initial | `relay_id`, `version`, `is_proxy`/`node_type` |
+| `agent_list` | Snapshot des agents du relay | `agents[]` (`hostname`, `status`, `last_seen`) |
+| `task_result` | Résultat d'un exec | `task_id`, `rc`, `stdout`, `stderr`, `truncated` |
+| `upload_result` | Résultat d'un upload | `task_id`, `rc` |
+| `fetch_result` | Résultat d'un fetch | `task_id`, `rc`, `data` (base64) |
+
+**Proxy → Relay :**
+
+| Type | Description | Champs clés |
+|---|---|---|
+| `relay_ack` | Ack du handshake | `relay_id`, `status`, `timestamp` |
+| `agent_list_ack` | Ack de l'agent_list | `relay_id`, `count` |
+| `task_dispatch` | Dispatch d'un exec | `task_id`, `hostname`, `cmd`, `stdin`, `timeout`, `become` |
+| `file_upload` | Upload fichier vers relay | `task_id`, `hostname`, `dest`, `data`, `mode` |
+| `file_fetch` | Fetch fichier depuis relay | `task_id`, `hostname`, `src` |
+| `task_cancel` | Annulation d'une tâche | `task_id`, `hostname` |
+
+#### Codes de fermeture WebSocket (relay-spécifiques)
+
+| Code | Signification |
+|---|---|
+| `4010` | Token relay révoqué — ne pas reconnecter |
+| `4011` | Token relay expiré — rafraîchir et reconnecter |
+| `4000` | Fermeture normale |
+
+#### Format d'enveloppe (JSON unifié)
+
+```json
+{
+  "type": "task_dispatch",
+  "task_id": "uuid-v4",
+  "hostname": "host-A",
+  "cmd": "python3 /tmp/module.py",
+  "stdin": null,
+  "timeout": 30,
+  "become": false,
+  "become_method": "sudo"
+}
+```
+
+---
+
+### 23.3 Inventaire unifié
+
+En mode proxy, `GET /api/inventory` agrège :
+1. Les agents directement connectés au proxy (`/ws/agent`)
+2. Les agents rapportés via `agent_list` des relays en mode pull
+3. Les agents découverts via `GET /api/inventory` des relays en mode push (poll toutes les 30s)
+
+La réponse est enrichie avec `secagent_relay_id` dans les hostvars :
+
+```json
+{
+  "all": { "hosts": ["host-A", "host-B", "host-C"] },
+  "_meta": {
+    "hostvars": {
+      "host-A": {
+        "ansible_connection": "relay",
+        "ansible_host": "host-A",
+        "secagent_status": "connected",
+        "secagent_last_seen": "2026-05-22T15:00:00Z",
+        "secagent_relay_id": "dmz1"
+      }
+    }
+  }
+}
+```
+
+---
+
+### 23.4 Routage des tâches
+
+```
+POST /api/exec/host-A  (reçu par le proxy)
+  │
+  ├─ Lookup relay_routing : hostname="host-A" → relay_id="dmz1"
+  │
+  ├─ Relay DMZ1 connecté en mode pull ?
+  │    └─ Oui → DispatchToRelay("dmz1", {type:"task_dispatch", ...})
+  │               └─ Attend le task_result via canal bloquant
+  │
+  └─ Relay DMZ1 en mode push ?
+       └─ Oui → RelayClient.Exec("https://dmz1.example.com:7770", hostname, req)
+                  └─ Appel REST bloquant, retourne ExecResponse
+```
+
+Si le hostname est inconnu de tous les relays :
+- HTTP 503 `{ "error": "host_not_found" }`
+
+**Protection anti-boucle** : l'en-tête `X-Relay-Hops` (initial : 8) est décrémenté à chaque nœud proxy. Un proxy qui reçoit `X-Relay-Hops: 0` retourne HTTP 508.
+
+---
+
+### 23.5 Chaînage proxy→proxy
+
+Un relay peut lui-même être un proxy. Le champ `is_proxy: true` (ou `node_type: "proxy"`) dans le message `relay_hello` indique ce fait au proxy parent.
+
+```
+Proxy-A (expose /api/inventory, /api/exec)
+  └── (pull) Proxy-B
+        └── (pull) Relay-DMZ3
+              └── host-X
+```
+
+Le routage est transparent : `POST /api/exec/host-X` sur Proxy-A →
+routé vers Proxy-B → routé vers Relay-DMZ3 → exécuté sur host-X.
+
+Le chaînage repose sur le fait que l'interface REST est identique entre un relay et un proxy.
+
+---
+
+### 23.6 Authentification inter-nœuds
+
+#### Rôle JWT `relay`
+
+Nouveau rôle JWT utilisé pour les connexions relay↔proxy :
+
+```json
+{
+  "sub": "dmz1",
+  "role": "relay",
+  "jti": "uuid",
+  "iat": 1234567890,
+  "exp": 1234571490
+}
+```
+
+Permissions :
+- `open_relay_ws` : autorisation d'ouvrir `WSS /ws/relay`
+- Un JWT `role: relay` ne peut **pas** ouvrir `/ws/agent`
+- Un JWT `role: agent` ne peut **pas** ouvrir `/ws/relay`
+
+Les tokens relay sont créés via `POST /api/admin/tokens` avec `"role": "relay"` (même mécanisme que les tokens plugin).
+
+---
+
+### 23.7 Schéma de persistance (tables proxy)
+
+```sql
+-- Relays enregistrés (mode pull auto-découverts ou mode push configurés)
+CREATE TABLE IF NOT EXISTS relay_nodes (
+    id          TEXT PRIMARY KEY,       -- UUID interne
+    relay_id    TEXT NOT NULL UNIQUE,   -- identifiant lisible, ex: "dmz1"
+    url         TEXT,                   -- URL base HTTP — mode push uniquement
+    description TEXT,
+    token_hash  TEXT,                   -- hash token auth (mode push) ou JTI (mode pull)
+    mode        TEXT NOT NULL DEFAULT 'pull',   -- "pull" | "push"
+    is_proxy    INTEGER NOT NULL DEFAULT 0,     -- 1 si ce relay est lui-même un proxy
+    created_at  INTEGER NOT NULL,
+    last_seen   INTEGER,               -- Unix timestamp, NULL si jamais connecté
+    status      TEXT NOT NULL DEFAULT 'pending'  -- "connected" | "disconnected" | "pending"
+);
+
+-- Table de routage hostname → relay_id (mise à jour par agent_list / poll push)
+CREATE TABLE IF NOT EXISTS relay_routing (
+    hostname    TEXT PRIMARY KEY,
+    relay_id    TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    FOREIGN KEY (relay_id) REFERENCES relay_nodes(relay_id)
+);
+```
+
+---
+
+### 23.8 Configuration
+
+#### Variables d'environnement du proxy
+
+| Variable | Description |
+|---|---|
+| `PROXY_MODE` | `true` pour activer le mode proxy |
+| `PROXY_INVENTORY_POLL_INTERVAL` | Intervalle de poll mode push (défaut : `30s`) |
+
+#### Docker Compose multi-zones (qualif)
+
+```yaml
+# docker-compose-proxy.yml (extrait)
+services:
+  proxy:
+    environment:
+      PROXY_MODE: "true"
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+    ports:
+      - "7773:7770"   # port distinct pour ne pas conflicton avec qualif standard
+
+  relay-dmz1:
+    environment:
+      PROXY_MODE: "false"
+      RELAY_SERVER_URL: "wss://proxy:7772/ws/relay"
+      RELAY_JWT: ${RELAY_DMZ1_JWT}    # JWT rôle=relay pour s'authentifier au proxy
+```
+
+---
+
+### 23.9 Récapitulatif modifications par composant
+
+| Composant | Modification |
+|---|---|
+| **DB** | Tables `relay_nodes` + `relay_routing` |
+| **Server (WS)** | Nouveau handler `/ws/relay` (`ws/relay_handler.go`) |
+| **Server (proxy)** | Nouveau package `internal/proxy/` (router, client push, push_manager) |
+| **Server (handlers)** | `exec.go` + `inventory.go` : routage proxy si `PROXY_MODE=true` |
+| **Server (admin)** | Endpoints `POST/GET/DELETE /api/admin/relays`, `GET /api/admin/relays/status` |
+| **Server (auth)** | Rôle JWT `relay` dans `auth/jwt.go` |
+| **CLI** | `secagent-server relays list|get|status|add|remove` |
+| **Infra** | `DEPLOYMENT/qualif/docker-compose-proxy.yml` |

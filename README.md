@@ -2,6 +2,13 @@
 
 Système permettant d'exécuter des playbooks Ansible sur des hôtes distants sans connexion SSH entrante. Les agents clients initient eux-mêmes la connexion vers un serveur central (modèle **Salt Minion**, connexions inversées).
 
+## Fonctionnalités principales
+
+- **Connexions inversées** — les agents initient la connexion sortante vers le serveur (NAT/firewall friendly)
+- **Auth JWT + RSA-4096** — enrollment sécurisé, rôles RBAC (`agent` / `plugin` / `admin` / `relay`)
+- **Event Hooks** — actions configurables via JSON (webhook, shell, file, API) déclenchées par événements agent
+- **Proxy/Gateway multi-zone** — `PROXY_MODE=true` agrège plusieurs relays DMZ en un point d'entrée unique (modes pull/push, chaînage proxy→proxy, inventaire unifié)
+
 ## Quick Start
 
 ### 1. Serveur
@@ -132,11 +139,13 @@ ansible-secagent/
 
 ## Phase de Développement
 
-- ✅ **Phase 0** : Backlog + architecture (41 tâches)
-- ✅ **Phase 1** : secagent-minion + tests
-- ✅ **Phase 2** : secagent-server + NATS JetStream
-- ✅ **Phase 3** : Plugins Ansible + E2E tests
-- ⏳ **Phase 4** : Production Kubernetes (après validation)
+- ✅ **Phases 1–9** : Agents, serveur, NATS, WebSocket, plugins Ansible, inventaire, JWT, CLI, sécurité RSA-4096
+- ✅ **Phase 10** : Enrollment Token (système de tokens pré-signés)
+- ✅ **Phase 11** : Event Hooks unifiés (JSON config, 4 executors, action_log)
+- ✅ **Phase 12** : Proxy/Gateway multi-zone (pull/push, inventaire agrégé, chaînage, JWT rôle relay)
+- ⏳ **Phase 13** : Production Kubernetes (après validation qualif)
+
+**Version actuelle : v2.0.0** — QA VALIDATED (917/920 tests)
 
 ## Contacts & Support
 
