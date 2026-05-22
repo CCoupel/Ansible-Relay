@@ -17,7 +17,7 @@ COPY . .
 
 # Build the binary — CGO required by go-sqlite3
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-s -w" -o secagent-server ./cmd/server
+    go build -ldflags="-s -w" -o secagent-server ./cmd/secagent-server
 
 # Runtime stage
 FROM alpine:3.18
