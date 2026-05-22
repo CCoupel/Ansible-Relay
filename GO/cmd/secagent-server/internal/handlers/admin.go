@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"secagent-server/cmd/secagent-server/internal/storage"
+	"secagent-server/cmd/secagent-server/internal/webhooks"
 	"secagent-server/cmd/secagent-server/internal/ws"
 )
 
@@ -479,6 +480,15 @@ func AdminRevokeMinion(w http.ResponseWriter, r *http.Request) {
 
 	// Mark agent as disconnected in DB
 	_ = adminStore.UpdateAgentStatus(ctx, hostname, "disconnected", "")
+
+	// Dispatch host.revoked event (async, nil-safe during tests)
+	if webhooks.GlobalDispatcher != nil {
+		webhooks.GlobalDispatcher.Dispatch(webhooks.EventHostRevoked, webhooks.EventPayload{
+			Event:     string(webhooks.EventHostRevoked),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Host:      webhooks.HostInfo{Hostname: hostname, Status: "revoked"},
+		})
+	}
 
 	log.Printf("Minion revoked: hostname=%s ws_disconnected=%v", hostname, wsDisconnected)
 	writeJSON(w, http.StatusOK, map[string]interface{}{

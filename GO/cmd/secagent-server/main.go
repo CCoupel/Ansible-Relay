@@ -129,6 +129,15 @@ func main() {
 	dispatcher := webhooks.NewDispatcher(store, 1000)
 	dispatcher.Start(dispatchCtx)
 	webhooks.GlobalDispatcher = dispatcher
+
+	// Wire DispatchFunc into ws package (avoids import cycle ws→webhooks)
+	ws.DispatchFunc = func(event, hostname, status string) {
+		dispatcher.Dispatch(webhooks.EventType(event), webhooks.EventPayload{
+			Event:     event,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Host:      webhooks.HostInfo{Hostname: hostname, Status: status},
+		})
+	}
 	log.Println("[OK] Webhook dispatcher started")
 
 	// Create routers

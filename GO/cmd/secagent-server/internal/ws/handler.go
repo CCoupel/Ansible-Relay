@@ -80,6 +80,11 @@ var (
 	// It should sign a new JWT and send the encrypted token to the agent.
 	// Injected from handlers at startup; nil = send a plain rekey signal (no encrypted token).
 	RekeyFunc func(hostname string) bool
+
+	// DispatchFunc is called when an agent connects (host.up) or disconnects (host.down).
+	// Injected from main.go at startup to avoid an import cycle between ws and webhooks.
+	// nil = no webhook dispatch (tests, degraded mode).
+	DispatchFunc func(event string, hostname string, status string)
 )
 
 // SetRekeyFunc injects the function used to issue a new encrypted token to an agent.
@@ -111,6 +116,10 @@ func RegisterConnection(hostname string, conn *AgentConnection) {
 
 	wsConnections[hostname] = conn
 	log.Printf("Agent connected: hostname=%s", hostname)
+
+	if DispatchFunc != nil {
+		go DispatchFunc("host.up", hostname, "connected")
+	}
 }
 
 // UnregisterConnection removes a hostname from active connections
@@ -120,6 +129,10 @@ func UnregisterConnection(hostname string) {
 
 	delete(wsConnections, hostname)
 	log.Printf("Agent disconnected: hostname=%s", hostname)
+
+	if DispatchFunc != nil {
+		go DispatchFunc("host.down", hostname, "disconnected")
+	}
 
 	// Resolve all pending futures with error
 	ResolveFuturesForHostname(hostname, "agent_disconnected")
