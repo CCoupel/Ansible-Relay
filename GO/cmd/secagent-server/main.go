@@ -168,6 +168,14 @@ func main() {
 	}
 	log.Println("[OK] Hooks dispatcher started")
 
+	// Wire relay routing/status update functions into ws package (avoids import cycle ws→storage)
+	ws.RelayRoutingBulkUpsertFunc = func(relayID string, hostnames []string) error {
+		return store.BulkUpsertRelayRouting(relayID, hostnames)
+	}
+	ws.RelayStatusUpdateFunc = func(relayID, status string, lastSeen int64) error {
+		return store.UpdateRelayStatus(relayID, status, lastSeen)
+	}
+
 	// Create routers
 	apiRouter := http.NewServeMux()
 	adminRouter := http.NewServeMux()
@@ -238,6 +246,12 @@ func main() {
 
 	// === PORT 7772: WEBSOCKET ===
 	wsRouter.HandleFunc("/ws/agent", ws.AgentHandler)
+	// /ws/relay: only active in proxy mode (relays connect to the proxy here)
+	if proxyCfg.Enabled {
+		wsRouter.HandleFunc("/ws/relay", ws.RelayHandler)
+		apiRouter.HandleFunc("/ws/relay", ws.RelayHandler) // also on 7770 for compat
+		log.Println("[PROXY] /ws/relay endpoint enabled")
+	}
 
 	// Create HTTP servers
 	apiServer := &http.Server{
