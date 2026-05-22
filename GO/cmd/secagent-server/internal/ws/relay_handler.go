@@ -214,7 +214,9 @@ func registerRelayConnection(conn *RelayConnection) {
 	relayConnsMu.Unlock()
 
 	if RelayStatusUpdateFunc != nil {
-		_ = RelayStatusUpdateFunc(conn.RelayID, "connected", time.Now().Unix())
+		if err := RelayStatusUpdateFunc(conn.RelayID, "connected", time.Now().Unix()); err != nil {
+			log.Printf("registerRelayConnection: status update error: relay_id=%s err=%v", conn.RelayID, err)
+		}
 	}
 	log.Printf("Relay connected: relay_id=%s is_proxy=%v", conn.RelayID, conn.IsProxy)
 }
@@ -227,12 +229,16 @@ func unregisterRelayConnection(relayID string) {
 
 	// Update DB status
 	if RelayStatusUpdateFunc != nil {
-		_ = RelayStatusUpdateFunc(relayID, "disconnected", time.Now().Unix())
+		if err := RelayStatusUpdateFunc(relayID, "disconnected", time.Now().Unix()); err != nil {
+			log.Printf("unregisterRelayConnection: status update error: relay_id=%s err=%v", relayID, err)
+		}
 	}
 
-	// Clear routing for this relay
+	// Clear routing for this relay (empty hostnames list = delete all entries for relayID)
 	if RelayRoutingBulkUpsertFunc != nil {
-		_ = RelayRoutingBulkUpsertFunc(relayID, nil) // empty list = clear all entries
+		if err := RelayRoutingBulkUpsertFunc(relayID, nil); err != nil {
+			log.Printf("unregisterRelayConnection: routing clear error: relay_id=%s err=%v", relayID, err)
+		}
 	}
 
 	// Resolve all pending task futures with disconnect error

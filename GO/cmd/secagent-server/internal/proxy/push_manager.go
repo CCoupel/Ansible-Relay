@@ -148,8 +148,10 @@ func (m *PushManager) pollOnce(ctx context.Context, state *relayPollState) {
 	if err != nil {
 		log.Printf("[PROXY] PushManager poll error: relay_id=%s err=%v (backoff=%s)",
 			relayID, err, state.backoff)
-		// Mark relay as disconnected
-		_ = m.store.UpdateRelayStatus(relayID, "disconnected", time.Now().Unix())
+		// Mark relay as disconnected (best-effort — already logged poll error above)
+		if statusErr := m.store.UpdateRelayStatus(relayID, "disconnected", time.Now().Unix()); statusErr != nil {
+			log.Printf("[PROXY] PushManager: UpdateRelayStatus disconnected error: relay_id=%s err=%v", relayID, statusErr)
+		}
 		// Back off before the next ticker fires
 		applyBackoff(ctx, state)
 		return
@@ -170,7 +172,9 @@ func (m *PushManager) pollOnce(ctx context.Context, state *relayPollState) {
 	}
 
 	// Mark relay as connected
-	_ = m.store.UpdateRelayStatus(relayID, "connected", time.Now().Unix())
+	if statusErr := m.store.UpdateRelayStatus(relayID, "connected", time.Now().Unix()); statusErr != nil {
+		log.Printf("[PROXY] PushManager: UpdateRelayStatus connected error: relay_id=%s err=%v", relayID, statusErr)
+	}
 
 	log.Printf("[PROXY] PushManager poll ok: relay_id=%s agents=%d", relayID, len(hostnames))
 }
