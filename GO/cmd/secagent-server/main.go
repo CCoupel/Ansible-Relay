@@ -15,6 +15,7 @@ import (
 	"secagent-server/cmd/secagent-server/internal/cli"
 	"secagent-server/cmd/secagent-server/internal/handlers"
 	"secagent-server/cmd/secagent-server/internal/storage"
+	"secagent-server/cmd/secagent-server/internal/webhooks"
 	"secagent-server/cmd/secagent-server/internal/ws"
 )
 
@@ -122,6 +123,14 @@ func main() {
 		return natsClient != nil && natsClient.IsConnected()
 	}
 
+	// Initialize webhook dispatcher (async event delivery)
+	dispatchCtx, dispatchCancel := context.WithCancel(context.Background())
+	defer dispatchCancel()
+	dispatcher := webhooks.NewDispatcher(store, 1000)
+	dispatcher.Start(dispatchCtx)
+	webhooks.GlobalDispatcher = dispatcher
+	log.Println("[OK] Webhook dispatcher started")
+
 	// Create routers
 	apiRouter := http.NewServeMux()
 	adminRouter := http.NewServeMux()
@@ -177,6 +186,16 @@ func main() {
 	// Server status / stats
 	adminRouter.HandleFunc("GET /api/admin/status", handlers.AdminStatus)
 	adminRouter.HandleFunc("GET /api/admin/stats", handlers.AdminStats)
+
+	// Webhooks CRUD (Phase 11)
+	adminRouter.HandleFunc("POST /api/admin/webhooks", handlers.AdminCreateWebhook)
+	adminRouter.HandleFunc("GET /api/admin/webhooks", handlers.AdminListWebhooks)
+	adminRouter.HandleFunc("GET /api/admin/webhooks/{id}", handlers.AdminGetWebhook)
+	adminRouter.HandleFunc("DELETE /api/admin/webhooks/{id}", handlers.AdminDeleteWebhook)
+	adminRouter.HandleFunc("GET /api/admin/webhooks/{id}/deliveries", handlers.AdminListDeliveries)
+
+	// Agent deletion (distinct from revoke — supprime la DB row)
+	adminRouter.HandleFunc("DELETE /api/admin/minions/{hostname}", handlers.AdminDeleteMinion)
 
 	// === PORT 7772: WEBSOCKET ===
 	wsRouter.HandleFunc("/ws/agent", ws.AgentHandler)

@@ -388,6 +388,33 @@ func (s *Store) ListAgents(ctx context.Context, onlyConnected bool) ([]AgentReco
 	return agents, rows.Err()
 }
 
+// DeleteAgent removes an agent from the agents table and its authorized key if present.
+// Returns (true, nil) if deleted, (false, nil) if not found.
+func (s *Store) DeleteAgent(ctx context.Context, hostname string) (bool, error) {
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
+
+	result, err := s.db.ExecContext(ctx, "DELETE FROM agents WHERE hostname = ?", hostname)
+	if err != nil {
+		return false, fmt.Errorf("DeleteAgent: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("DeleteAgent rows: %w", err)
+	}
+
+	if affected == 0 {
+		return false, nil
+	}
+
+	// Best-effort cleanup of authorized_keys row
+	_, _ = s.db.ExecContext(ctx, "DELETE FROM authorized_keys WHERE hostname = ?", hostname)
+
+	log.Printf("Agent deleted: hostname=%s", hostname)
+	return true, nil
+}
+
 // UpdateLastSeen updates the last_seen timestamp and sets status to 'connected'
 func (s *Store) UpdateLastSeen(ctx context.Context, hostname string) (bool, error) {
 	s.dbMu.Lock()
