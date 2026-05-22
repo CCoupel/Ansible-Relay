@@ -154,9 +154,10 @@ func AdminCreateRelay(w http.ResponseWriter, r *http.Request) {
 
 	case "push":
 		node.URL = req.URL
-		// Store SHA-256 of the provided token
-		h := sha256.Sum256([]byte(req.Token))
-		node.TokenHash = fmt.Sprintf("%x", h)
+		// Store plain token for push mode — PushManager sends it as Bearer token
+		// to authenticate to the downstream relay's admin API (Sprint 2 design).
+		// Pull mode stores SHA-256 only (JWT not needed after registration).
+		node.TokenHash = req.Token
 	}
 
 	if err := adminStore.UpsertRelayNode(node); err != nil {
