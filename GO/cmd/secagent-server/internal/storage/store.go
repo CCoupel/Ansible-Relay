@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -137,10 +138,10 @@ func NewStore(dbURL string) (*Store, error) {
 	// dbURL format: "sqlite:////data/relay.db" or "sqlite:///./relay.db"
 	// Convert to file path for sql.Open
 	filePath := dbURL
-	if len(filePath) > 9 && filePath[:9] == "sqlite:///" {
-		filePath = filePath[9:] // Remove "sqlite://"
-	} else if len(filePath) > 10 && filePath[:10] == "sqlite:////" {
-		filePath = filePath[10:] // Remove "sqlite:///"
+	if strings.HasPrefix(filePath, "sqlite:////") {
+		filePath = filePath[len("sqlite:////"):]
+	} else if strings.HasPrefix(filePath, "sqlite:///") {
+		filePath = "/" + filePath[len("sqlite:///"):]
 	}
 
 	// Ensure parent directory exists
