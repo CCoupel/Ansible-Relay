@@ -17,7 +17,7 @@ COPY . .
 
 # Build the agent binary — no CGO (no sqlite in agent)
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-s -w" -o secagent-minion ./cmd/agent
+    go build -ldflags="-s -w" -o secagent-minion ./cmd/secagent-minion
 
 # Runtime stage — minimal Alpine
 FROM alpine:3.18
