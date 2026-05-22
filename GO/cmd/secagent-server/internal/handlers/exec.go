@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -215,6 +216,20 @@ func ExecCommand(w http.ResponseWriter, r *http.Request) {
 
 	// Proxy mode: check if hostname is on a remote relay BEFORE checking local WS
 	if proxyRouter != nil {
+		// Anti-loop: read X-Relay-Hops, reject if budget exhausted, decrement for outgoing call
+		proxyHops := proxy.DefaultMaxHops
+		if hopStr := r.Header.Get(proxy.RelayHopsHeader); hopStr != "" {
+			if n, convErr := strconv.Atoi(hopStr); convErr == nil {
+				if n <= 0 {
+					log.Printf("[PROXY] relay_loop_detected: hostname=%s hops=%d", hostname, n)
+					writeJSON(w, http.StatusLoopDetected, map[string]string{"error": "relay_loop_detected"})
+					return
+				}
+				proxyHops = n - 1
+			}
+		}
+		proxyCtx := proxy.WithRelayHops(r.Context(), proxyHops)
+
 		relayID, relayErr := proxyRouter.GetRelayForHostname(hostname)
 		if relayErr == nil {
 			// Hostname is managed by a downstream relay — route via proxy
@@ -229,7 +244,7 @@ func ExecCommand(w http.ResponseWriter, r *http.Request) {
 			if req.Stdin != nil {
 				proxyReq.Stdin = *req.Stdin
 			}
-			resp, pErr := proxyRouter.RouteExec(r.Context(), hostname, *taskID, proxyReq)
+			resp, pErr := proxyRouter.RouteExec(proxyCtx, hostname, *taskID, proxyReq)
 			if pErr != nil {
 				writeProxyExecError(w, pErr, hostname, *taskID)
 				return
@@ -342,12 +357,26 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 
 	// Proxy mode: check relay routing before local WS
 	if proxyRouter != nil {
+		// Anti-loop: read X-Relay-Hops, reject if budget exhausted, decrement for outgoing call
+		proxyHops := proxy.DefaultMaxHops
+		if hopStr := r.Header.Get(proxy.RelayHopsHeader); hopStr != "" {
+			if n, convErr := strconv.Atoi(hopStr); convErr == nil {
+				if n <= 0 {
+					log.Printf("[PROXY] relay_loop_detected: hostname=%s hops=%d", hostname, n)
+					writeJSON(w, http.StatusLoopDetected, map[string]string{"error": "relay_loop_detected"})
+					return
+				}
+				proxyHops = n - 1
+			}
+		}
+		proxyCtx := proxy.WithRelayHops(r.Context(), proxyHops)
+
 		relayID, relayErr := proxyRouter.GetRelayForHostname(hostname)
 		if relayErr == nil {
 			log.Printf("Upload request (proxy): hostname=%s relay_id=%s task_id=%s dest=%s size=%d",
 				hostname, relayID, *taskID, req.Dest, len(decoded))
 			proxyReq := proxy.UploadRequest{Dest: req.Dest, Data: req.Data, Mode: req.Mode}
-			if pErr := proxyRouter.RouteUpload(r.Context(), hostname, *taskID, proxyReq); pErr != nil {
+			if pErr := proxyRouter.RouteUpload(proxyCtx, hostname, *taskID, proxyReq); pErr != nil {
 				writeProxyExecError(w, pErr, hostname, *taskID)
 				return
 			}
@@ -426,12 +455,26 @@ func FetchFile(w http.ResponseWriter, r *http.Request) {
 
 	// Proxy mode: check relay routing before local WS
 	if proxyRouter != nil {
+		// Anti-loop: read X-Relay-Hops, reject if budget exhausted, decrement for outgoing call
+		proxyHops := proxy.DefaultMaxHops
+		if hopStr := r.Header.Get(proxy.RelayHopsHeader); hopStr != "" {
+			if n, convErr := strconv.Atoi(hopStr); convErr == nil {
+				if n <= 0 {
+					log.Printf("[PROXY] relay_loop_detected: hostname=%s hops=%d", hostname, n)
+					writeJSON(w, http.StatusLoopDetected, map[string]string{"error": "relay_loop_detected"})
+					return
+				}
+				proxyHops = n - 1
+			}
+		}
+		proxyCtx := proxy.WithRelayHops(r.Context(), proxyHops)
+
 		relayID, relayErr := proxyRouter.GetRelayForHostname(hostname)
 		if relayErr == nil {
 			log.Printf("Fetch request (proxy): hostname=%s relay_id=%s task_id=%s src=%s",
 				hostname, relayID, *taskID, req.Src)
 			proxyReq := proxy.FetchRequest{Src: req.Src}
-			resp, pErr := proxyRouter.RouteFetch(r.Context(), hostname, *taskID, proxyReq)
+			resp, pErr := proxyRouter.RouteFetch(proxyCtx, hostname, *taskID, proxyReq)
 			if pErr != nil {
 				writeProxyExecError(w, pErr, hostname, *taskID)
 				return

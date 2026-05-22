@@ -16,9 +16,39 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// ── Anti-loop hop counting ────────────────────────────────────────────────────
+
+// RelayHopsHeader is the HTTP header used to prevent routing loops in proxy chains.
+// Its value is decremented at each proxy node that forwards the request.
+// A value of 0 received at a proxy node triggers an HTTP 508 (Loop Detected) response.
+const RelayHopsHeader = "X-Relay-Hops"
+
+// DefaultMaxHops is the initial hop budget for proxy chains.
+// Supports up to 8 consecutive proxy hops before loop detection fires.
+const DefaultMaxHops = 8
+
+// hopCountKey is the unexported context key for the remaining hop budget.
+type hopCountKey struct{}
+
+// WithRelayHops stores the remaining hop count in ctx.
+// Call this after decrementing the value received in the incoming X-Relay-Hops header.
+func WithRelayHops(ctx context.Context, hops int) context.Context {
+	return context.WithValue(ctx, hopCountKey{}, hops)
+}
+
+// RelayHopsFromContext retrieves the hop count from ctx.
+// Returns DefaultMaxHops when no value has been stored (first node in the chain).
+func RelayHopsFromContext(ctx context.Context) int {
+	if v, ok := ctx.Value(hopCountKey{}).(int); ok {
+		return v
+	}
+	return DefaultMaxHops
+}
 
 // ── Request / Response types ─────────────────────────────────────────────────
 
@@ -187,6 +217,7 @@ func (c *RelayClient) get(ctx context.Context, path string) ([]byte, int, error)
 		return nil, 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set(RelayHopsHeader, strconv.Itoa(RelayHopsFromContext(ctx)))
 	return c.do(req)
 }
 
@@ -201,6 +232,7 @@ func (c *RelayClient) post(ctx context.Context, path string, body interface{}) (
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(RelayHopsHeader, strconv.Itoa(RelayHopsFromContext(ctx)))
 	return c.do(req)
 }
 

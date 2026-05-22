@@ -43,9 +43,10 @@ type RelayMessage struct {
 	Type string `json:"type"`
 
 	// relay_hello / relay_ack
-	RelayID string `json:"relay_id,omitempty"`
-	Version string `json:"version,omitempty"`
-	IsProxy bool   `json:"is_proxy,omitempty"`
+	RelayID  string `json:"relay_id,omitempty"`
+	Version  string `json:"version,omitempty"`
+	IsProxy  bool   `json:"is_proxy,omitempty"`
+	NodeType string `json:"node_type,omitempty"` // "relay" | "proxy" — alternative to is_proxy
 
 	// agent_list / agent_list_ack
 	Agents []RelayAgentInfo `json:"agents,omitempty"`
@@ -117,6 +118,11 @@ var RelayRoutingBulkUpsertFunc func(relayID string, hostnames []string) error
 // RelayStatusUpdateFunc updates the DB status for a relay.
 // Injected from main.go: func(relayID, status string, lastSeen int64) error
 var RelayStatusUpdateFunc func(relayID, status string, lastSeen int64) error
+
+// RelayIsProxyUpdateFunc persists the is_proxy flag for a relay node.
+// Injected from main.go: func(relayID string, isProxy bool) error
+// Called when a relay identifies itself as a proxy in relay_hello (node_type="proxy" or is_proxy=true).
+var RelayIsProxyUpdateFunc func(relayID string, isProxy bool) error
 
 // ── Public accessors ─────────────────────────────────────────────────────────
 
@@ -307,7 +313,16 @@ func handleRelayMessage(conn *RelayConnection, msg RelayMessage) {
 			log.Printf("Relay hello relay_id mismatch: jwt=%s hello=%s — using JWT",
 				conn.RelayID, msg.RelayID)
 		}
-		conn.IsProxy = msg.IsProxy
+		// node_type="proxy" or is_proxy=true both mark this node as a proxy
+		isProxyNode := msg.IsProxy || msg.NodeType == "proxy"
+		conn.IsProxy = isProxyNode
+		// Persist the is_proxy flag to DB so inventory aggregation and routing
+		// can distinguish proxy nodes from simple relay nodes
+		if isProxyNode && RelayIsProxyUpdateFunc != nil {
+			if err := RelayIsProxyUpdateFunc(conn.RelayID, true); err != nil {
+				log.Printf("relay_hello: SetRelayIsProxy error: relay_id=%s err=%v", conn.RelayID, err)
+			}
+		}
 		ack := RelayMessage{
 			Type:      "relay_ack",
 			RelayID:   conn.RelayID,
@@ -317,8 +332,8 @@ func handleRelayMessage(conn *RelayConnection, msg RelayMessage) {
 		conn.mu.Lock()
 		conn.Conn.WriteJSON(ack) //nolint:errcheck
 		conn.mu.Unlock()
-		log.Printf("relay_hello ack: relay_id=%s version=%s is_proxy=%v",
-			conn.RelayID, msg.Version, conn.IsProxy)
+		log.Printf("relay_hello ack: relay_id=%s version=%s is_proxy=%v node_type=%q",
+			conn.RelayID, msg.Version, conn.IsProxy, msg.NodeType)
 
 	case "agent_list":
 		// Relay announces its connected agents → update relay_routing

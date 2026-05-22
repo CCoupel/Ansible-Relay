@@ -187,6 +187,9 @@ func main() {
 	ws.RelayStatusUpdateFunc = func(relayID, status string, lastSeen int64) error {
 		return store.UpdateRelayStatus(relayID, status, lastSeen)
 	}
+	ws.RelayIsProxyUpdateFunc = func(relayID string, isProxy bool) error {
+		return store.SetRelayIsProxy(relayID, isProxy)
+	}
 
 	// Create routers
 	apiRouter := http.NewServeMux()

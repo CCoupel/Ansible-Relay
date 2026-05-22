@@ -152,6 +152,24 @@ func (s *Store) DeleteRelayNode(id string) error {
 	return nil
 }
 
+// SetRelayIsProxy updates the is_proxy flag for a relay identified by relay_id.
+// Called when a relay announces itself as a proxy node in relay_hello.
+func (s *Store) SetRelayIsProxy(relayID string, isProxy bool) error {
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
+
+	val := 0
+	if isProxy {
+		val = 1
+	}
+	_, err := s.db.Exec(
+		"UPDATE relay_nodes SET is_proxy = ? WHERE relay_id = ?", val, relayID)
+	if err != nil {
+		return fmt.Errorf("SetRelayIsProxy %q: %w", relayID, err)
+	}
+	return nil
+}
+
 // UpdateRelayStatus updates the status and last_seen for a relay identified by relay_id.
 func (s *Store) UpdateRelayStatus(relayID, status string, lastSeen int64) error {
 	s.dbMu.Lock()
