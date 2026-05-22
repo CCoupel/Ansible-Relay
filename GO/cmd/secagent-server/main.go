@@ -13,6 +13,7 @@ import (
 
 	"secagent-server/cmd/secagent-server/internal/broker"
 	"secagent-server/cmd/secagent-server/internal/cli"
+	"secagent-server/cmd/secagent-server/internal/config"
 	"secagent-server/cmd/secagent-server/internal/handlers"
 	"secagent-server/cmd/secagent-server/internal/hooks"
 	"secagent-server/cmd/secagent-server/internal/storage"
@@ -35,9 +36,10 @@ func isCLIMode() bool {
 	}
 	// Known CLI top-level commands
 	switch first {
-	case "minions", "security", "inventory", "server", "tokens", "hooks", "help", "completion":
+	case "minions", "security", "inventory", "server", "tokens", "hooks", "relays", "help", "completion":
 		return true
 	}
+	// --proxy / --proxy-mode are server flags, not CLI subcommands
 	return false
 }
 
@@ -64,6 +66,18 @@ func main() {
 		logLevel = "INFO"
 	}
 
+	// Support --proxy / --proxy-mode flag as an alternative to the PROXY_MODE env var.
+	// When the flag is present, override the env var so LoadProxyConfig picks it up.
+	for _, arg := range os.Args[1:] {
+		if arg == "--proxy" || arg == "--proxy-mode" {
+			os.Setenv("PROXY_MODE", "true")
+			break
+		}
+	}
+
+	// Load proxy configuration (reads PROXY_MODE + PROXY_RELAYS env vars).
+	proxyCfg := config.LoadProxyConfig()
+
 	// Validate required environment variables
 	if jwtSecret == "" {
 		log.Fatal("JWT_SECRET_KEY environment variable is required")
@@ -76,6 +90,14 @@ func main() {
 	log.Printf("[INIT] NATS_URL: %s", natsURL)
 	log.Printf("[INIT] DATABASE_URL: %s", dbURL)
 	log.Printf("[INIT] LOG_LEVEL: %s", logLevel)
+
+	// Log active operating mode
+	if proxyCfg.Enabled {
+		log.Printf("[PROXY] Mode proxy activé — %d relay(s) push configuré(s)", len(proxyCfg.PushRelays))
+	} else {
+		log.Printf("[INFO] mode=standalone — relay standard")
+	}
+	_ = proxyCfg // proxyCfg will be used by future proxy handlers (12.4–12.9)
 
 	// Initialize storage (SQLite)
 	log.Println("[INIT] Initializing SQLite database...")
