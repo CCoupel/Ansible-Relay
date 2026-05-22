@@ -3,6 +3,7 @@ package hooks
 // Tests du Dispatcher hooks — routage d'événements vers les actions configurées.
 //
 // Référence : DOC/server/HOOKS_SPEC.md §1, §2, §10
+// Brief     : _work/handoff/teamlead-to-test-writer-20260522-154000.md
 //
 // API réelle implémentée dans dispatcher.go :
 //
@@ -15,7 +16,7 @@ package hooks
 //   (d *Dispatcher) Dispatch(event, hostname, status, enrolledAt string)
 //   (d *Dispatcher) Start(ctx context.Context)
 //
-// Les tests utilisent mockActionLogger (défini ici) et des actions "file"
+// Les tests utilisent mockLogger (spec du brief) et des actions "file"
 // (observables via le filesystem) pour vérifier le routage sans réseau.
 
 import (
@@ -30,59 +31,47 @@ import (
 )
 
 // ========================================================================
-// mockActionLogger — implémente ActionLogger pour les tests
+// mockLogger — implémente ActionLogger (spec brief)
 // ========================================================================
 
-type mockActionLogger struct {
-	mu     sync.Mutex
-	logs   []storage.ActionLogEntry
-	notify chan struct{}
+type mockLogger struct {
+	mu      sync.Mutex
+	entries []storage.ActionLogEntry
 }
 
-func newMockActionLogger() *mockActionLogger {
-	return &mockActionLogger{notify: make(chan struct{}, 100)}
-}
-
-func (m *mockActionLogger) CreateActionLog(_ context.Context, entry storage.ActionLogEntry) error {
+func (m *mockLogger) CreateActionLog(_ context.Context, e storage.ActionLogEntry) error {
 	m.mu.Lock()
-	m.logs = append(m.logs, entry)
+	m.entries = append(m.entries, e)
 	m.mu.Unlock()
-	select {
-	case m.notify <- struct{}{}:
-	default:
-	}
 	return nil
 }
 
-// waitLogs attend que n enregistrements soient disponibles (timeout fatal).
-func (m *mockActionLogger) waitLogs(t *testing.T, n int, timeout time.Duration) []storage.ActionLogEntry {
+// waitEntries attend que n entrées soient disponibles (timeout fatal).
+func (m *mockLogger) waitEntries(t *testing.T, n int, timeout time.Duration) []storage.ActionLogEntry {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
 		m.mu.Lock()
-		count := len(m.logs)
+		count := len(m.entries)
 		m.mu.Unlock()
 		if count >= n {
 			m.mu.Lock()
-			result := make([]storage.ActionLogEntry, len(m.logs))
-			copy(result, m.logs)
+			result := make([]storage.ActionLogEntry, len(m.entries))
+			copy(result, m.entries)
 			m.mu.Unlock()
 			return result
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("timeout: waited %s for %d log(s), got %d", timeout, n, count)
 		}
-		select {
-		case <-m.notify:
-		case <-time.After(10 * time.Millisecond):
-		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
-func (m *mockActionLogger) logCount() int {
+func (m *mockLogger) entryCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return len(m.logs)
+	return len(m.entries)
 }
 
 // ========================================================================
@@ -119,11 +108,11 @@ func fileHookConfig(event, path, content string) *HooksConfig {
 }
 
 // ========================================================================
-// TestDispatch_routes_to_correct_hook
-// Seul le hook dont l'event correspond est déclenché
+// TestDispatcher_routes_to_correct_hook
+// host.new → seules les actions host.new exécutées (pas host.up)
 // ========================================================================
 
-func TestDispatch_routes_to_correct_hook(t *testing.T) {
+func TestDispatcher_routes_to_correct_hook(t *testing.T) {
 	dir := t.TempDir()
 	fileNew := filepath.Join(dir, "host.new.log")
 	fileUp := filepath.Join(dir, "host.up.log")
@@ -135,7 +124,7 @@ func TestDispatch_routes_to_correct_hook(t *testing.T) {
 		},
 	}
 
-	logger := newMockActionLogger()
+	logger := &mockLogger{}
 	d := NewDispatcher(logger, 10)
 	d.SetConfig(cfg)
 
@@ -157,14 +146,14 @@ func TestDispatch_routes_to_correct_hook(t *testing.T) {
 }
 
 // ========================================================================
-// TestDispatch_no_config
-// Config nil → aucune action, pas de panique, aucun log
+// TestDispatcher_no_config
+// SetConfig(nil) → Dispatch ne panique pas, aucune action exécutée
 // ========================================================================
 
-func TestDispatch_no_config(t *testing.T) {
-	logger := newMockActionLogger()
+func TestDispatcher_no_config(t *testing.T) {
+	logger := &mockLogger{}
 	d := NewDispatcher(logger, 10)
-	// SetConfig non appelé → config reste nil
+	d.SetConfig(nil) // config nil explicite
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -175,21 +164,21 @@ func TestDispatch_no_config(t *testing.T) {
 
 	// Attendre un peu — aucun log ne doit apparaître
 	time.Sleep(300 * time.Millisecond)
-	if logger.logCount() != 0 {
-		t.Errorf("expected 0 log entries with nil config, got %d", logger.logCount())
+	if logger.entryCount() != 0 {
+		t.Errorf("expected 0 log entries with nil config, got %d", logger.entryCount())
 	}
 }
 
 // ========================================================================
-// TestDispatch_set_config_hot_reload
-// SetConfig après démarrage → nouvelle config prise en compte immédiatement
+// TestDispatcher_set_config_hot_reload
+// SetConfig avec nouvelle config → nouveau comportement immédiatement
 // ========================================================================
 
-func TestDispatch_set_config_hot_reload(t *testing.T) {
+func TestDispatcher_set_config_hot_reload(t *testing.T) {
 	dir := t.TempDir()
 	logFile := filepath.Join(dir, "events.log")
 
-	logger := newMockActionLogger()
+	logger := &mockLogger{}
 	d := NewDispatcher(logger, 10)
 	// Démarrer sans config
 
@@ -200,8 +189,8 @@ func TestDispatch_set_config_hot_reload(t *testing.T) {
 	// Premier dispatch sans config → pas d'action
 	d.Dispatch("host.new", "h1", "disconnected", "")
 	time.Sleep(150 * time.Millisecond)
-	if logger.logCount() != 0 {
-		t.Errorf("expected 0 logs before SetConfig, got %d", logger.logCount())
+	if logger.entryCount() != 0 {
+		t.Errorf("expected 0 logs before SetConfig, got %d", logger.entryCount())
 	}
 
 	// Hot-reload : injecter la config
@@ -211,17 +200,16 @@ func TestDispatch_set_config_hot_reload(t *testing.T) {
 	d.Dispatch("host.new", "h1", "disconnected", "")
 
 	waitFile(t, logFile, 3*time.Second)
-	logger.waitLogs(t, 1, 3*time.Second)
+	logger.waitEntries(t, 1, 3*time.Second)
 }
 
 // ========================================================================
-// TestDispatch_queue_full_drop
-// bufSize=0 → la queue ne peut pas accepter d'événement sans consommateur ;
-// Dispatch retourne immédiatement sans bloquer ni paniquer
+// TestDispatcher_queue_full_drop
+// bufSize=0 → Dispatch() retourne immédiatement sans bloquer
 // ========================================================================
 
-func TestDispatch_queue_full_drop(t *testing.T) {
-	logger := newMockActionLogger()
+func TestDispatcher_queue_full_drop(t *testing.T) {
+	logger := &mockLogger{}
 	d := NewDispatcher(logger, 0) // queue de taille 0 = unbuffered
 
 	dir := t.TempDir()
@@ -245,21 +233,21 @@ func TestDispatch_queue_full_drop(t *testing.T) {
 
 	// Aucune action ne doit avoir été exécutée
 	time.Sleep(100 * time.Millisecond)
-	if logger.logCount() != 0 {
-		t.Errorf("expected 0 log entries (event dropped), got %d", logger.logCount())
+	if logger.entryCount() != 0 {
+		t.Errorf("expected 0 log entries (event dropped), got %d", logger.entryCount())
 	}
 }
 
 // ========================================================================
-// TestDispatch_writes_action_log
-// Action exécutée → CreateActionLog appelé avec les champs corrects
+// TestDispatcher_writes_action_log
+// Après exécution → store.CreateActionLog appelé avec les bons champs
 // ========================================================================
 
-func TestDispatch_writes_action_log(t *testing.T) {
+func TestDispatcher_writes_action_log(t *testing.T) {
 	dir := t.TempDir()
 	logFile := filepath.Join(dir, "events.log")
 
-	logger := newMockActionLogger()
+	logger := &mockLogger{}
 	d := NewDispatcher(logger, 10)
 	d.SetConfig(fileHookConfig("host.new", logFile, "triggered\n"))
 
@@ -269,38 +257,38 @@ func TestDispatch_writes_action_log(t *testing.T) {
 
 	d.Dispatch("host.new", "test-host", "disconnected", "2026-05-22T14:30:00Z")
 
-	logs := logger.waitLogs(t, 1, 3*time.Second)
-	rec := logs[0]
+	entries := logger.waitEntries(t, 1, 3*time.Second)
+	e := entries[0]
 
-	if rec.Event != "host.new" {
-		t.Errorf("ActionLogEntry.Event: got %q, want host.new", rec.Event)
+	if e.Event != "host.new" {
+		t.Errorf("ActionLogEntry.Event: got %q, want host.new", e.Event)
 	}
-	if rec.Hostname != "test-host" {
-		t.Errorf("ActionLogEntry.Hostname: got %q, want test-host", rec.Hostname)
+	if e.Hostname != "test-host" {
+		t.Errorf("ActionLogEntry.Hostname: got %q, want test-host", e.Hostname)
 	}
-	if rec.ActionType != "file" {
-		t.Errorf("ActionLogEntry.ActionType: got %q, want file", rec.ActionType)
+	if e.ActionType != "file" {
+		t.Errorf("ActionLogEntry.ActionType: got %q, want file", e.ActionType)
 	}
-	if rec.ActionIndex != 0 {
-		t.Errorf("ActionLogEntry.ActionIndex: got %d, want 0", rec.ActionIndex)
+	if e.ActionIndex != 0 {
+		t.Errorf("ActionLogEntry.ActionIndex: got %d, want 0", e.ActionIndex)
 	}
-	if !rec.Success {
-		t.Errorf("ActionLogEntry.Success: got false, error: %q", rec.Error)
+	if !e.Success {
+		t.Errorf("ActionLogEntry.Success: got false, error: %q", e.Error)
 	}
-	if rec.ConfigSnapshot == "" {
+	if e.ConfigSnapshot == "" {
 		t.Error("ActionLogEntry.ConfigSnapshot must not be empty")
 	}
-	if rec.ID == "" {
+	if e.ID == "" {
 		t.Error("ActionLogEntry.ID must not be empty (should be a UUID)")
 	}
 }
 
 // ========================================================================
-// TestDispatch_multiple_actions
-// Hook avec plusieurs actions → toutes exécutées, toutes loggées
+// TestDispatcher_multiple_actions
+// 3 actions dans un hook → les 3 exécutées, 3 entrées dans le log
 // ========================================================================
 
-func TestDispatch_multiple_actions(t *testing.T) {
+func TestDispatcher_multiple_actions(t *testing.T) {
 	dir := t.TempDir()
 	fileA := filepath.Join(dir, "a.log")
 	fileB := filepath.Join(dir, "b.log")
@@ -319,7 +307,7 @@ func TestDispatch_multiple_actions(t *testing.T) {
 		},
 	}
 
-	logger := newMockActionLogger()
+	logger := &mockLogger{}
 	d := NewDispatcher(logger, 10)
 	d.SetConfig(cfg)
 
@@ -329,8 +317,11 @@ func TestDispatch_multiple_actions(t *testing.T) {
 
 	d.Dispatch("host.up", "h1", "connected", "")
 
-	// 3 actions → 3 logs
-	logs := logger.waitLogs(t, 3, 5*time.Second)
+	// 3 actions → 3 entrées dans le log
+	entries := logger.waitEntries(t, 3, 5*time.Second)
+	if len(entries) < 3 {
+		t.Fatalf("expected at least 3 log entries, got %d", len(entries))
+	}
 
 	// Les 3 fichiers doivent exister
 	for _, f := range []string{fileA, fileB, fileC} {
@@ -339,15 +330,15 @@ func TestDispatch_multiple_actions(t *testing.T) {
 		}
 	}
 
-	// Les 3 logs doivent avoir ActionIndex 0, 1, 2 (l'ordre peut varier
-	// car les goroutines sont indépendantes)
+	// Les ActionIndex 0, 1, 2 doivent tous être présents
+	// (l'ordre peut varier car les goroutines sont indépendantes)
 	indexes := make(map[int]bool)
-	for _, l := range logs {
-		indexes[l.ActionIndex] = true
+	for _, e := range entries {
+		indexes[e.ActionIndex] = true
 	}
 	for _, want := range []int{0, 1, 2} {
 		if !indexes[want] {
-			t.Errorf("missing ActionIndex %d in logs", want)
+			t.Errorf("missing ActionIndex %d in log entries", want)
 		}
 	}
 }

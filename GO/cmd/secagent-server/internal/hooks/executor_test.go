@@ -49,9 +49,9 @@ func testVars() map[string]string {
 // WebhookExecutor — action "webhook" (HTTP POST + HMAC + retry)
 // ========================================================================
 
-// TestWebhookExecutor_success
+// TestWebhookExecutor_success_200
 // Serveur répond 200 → success=true, errMsg vide, durationMs >= 0
-func TestWebhookExecutor_success(t *testing.T) {
+func TestWebhookExecutor_success_200(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -77,9 +77,9 @@ func TestWebhookExecutor_success(t *testing.T) {
 	}
 }
 
-// TestWebhookExecutor_hmac
+// TestWebhookExecutor_hmac_signature
 // Secret non vide → header X-Signature présent, préfixe "sha256=", hex 64 chars
-func TestWebhookExecutor_hmac(t *testing.T) {
+func TestWebhookExecutor_hmac_signature(t *testing.T) {
 	var gotSig string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotSig = r.Header.Get("X-Signature")
@@ -113,9 +113,9 @@ func TestWebhookExecutor_hmac(t *testing.T) {
 	}
 }
 
-// TestWebhookExecutor_no_hmac
+// TestWebhookExecutor_no_hmac_no_secret
 // Secret vide → header X-Signature absent
-func TestWebhookExecutor_no_hmac(t *testing.T) {
+func TestWebhookExecutor_no_hmac_no_secret(t *testing.T) {
 	var gotSig string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotSig = r.Header.Get("X-Signature")
@@ -141,16 +141,17 @@ func TestWebhookExecutor_no_hmac(t *testing.T) {
 	}
 }
 
-// TestWebhookExecutor_retry_5xx
-// Serveur retourne 500 puis 200 → retry effectué, succès final
-func TestWebhookExecutor_retry_5xx(t *testing.T) {
+// TestWebhookExecutor_retry_on_5xx
+// Serveur retourne 500 sur les 2 premiers appels, 200 au 3e →
+// max_retries=2 (3 tentatives) → succès final, count=3
+func TestWebhookExecutor_retry_on_5xx(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := calls.Add(1)
-		if n == 1 {
-			w.WriteHeader(http.StatusInternalServerError) // 1re tentative : échec
+		if n < 3 {
+			w.WriteHeader(http.StatusInternalServerError) // tentatives 1 et 2 : échec
 		} else {
-			w.WriteHeader(http.StatusOK) // 2e tentative : succès
+			w.WriteHeader(http.StatusOK) // tentative 3 : succès
 		}
 	}))
 	defer srv.Close()
@@ -159,7 +160,7 @@ func TestWebhookExecutor_retry_5xx(t *testing.T) {
 	action := ActionDef{
 		Type:           "webhook",
 		URL:            srv.URL,
-		MaxRetries:     1, // 1 retry → 2 tentatives max
+		MaxRetries:     2, // 2 retries → 3 tentatives max
 		TimeoutSeconds: 5,
 	}
 
@@ -167,14 +168,14 @@ func TestWebhookExecutor_retry_5xx(t *testing.T) {
 	if !success {
 		t.Errorf("expected success=true after retry, got false (errMsg: %q)", errMsg)
 	}
-	if calls.Load() != 2 {
-		t.Errorf("expected 2 HTTP calls, got %d", calls.Load())
+	if calls.Load() != 3 {
+		t.Errorf("expected 3 HTTP calls (max_retries=2), got %d", calls.Load())
 	}
 }
 
-// TestWebhookExecutor_no_retry_4xx
+// TestWebhookExecutor_no_retry_on_4xx
 // Serveur retourne 404 → aucun retry, échec immédiat (errMsg préfixé "HTTP 4")
-func TestWebhookExecutor_no_retry_4xx(t *testing.T) {
+func TestWebhookExecutor_no_retry_on_4xx(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
