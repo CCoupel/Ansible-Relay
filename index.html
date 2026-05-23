@@ -16,6 +16,8 @@
     <li><a href="#solution"     data-i18n="nav.solution">Solution</a></li>
     <li><a href="#nonintrusive" data-i18n="nav.compat">Compatibilité</a></li>
     <li><a href="#security"     data-i18n="nav.security">Sécurité</a></li>
+    <li><a href="#proxy"        data-i18n="nav.proxy">Proxy/Gateway</a></li>
+    <li><a href="#hooks"        data-i18n="nav.hooks">Event Hooks</a></li>
     <li><a href="#features"     data-i18n="nav.features">Fonctionnalités</a></li>
     <li><a href="#mgmt"         data-i18n="nav.mgmt">Management</a></li>
     <li><a href="#install"      data-i18n="nav.install">Installation</a></li>
@@ -36,6 +38,9 @@
       <span class="badge">JWT + RSA-4096</span>
       <span class="badge blue"   data-i18n="hero.badge.native">Ansible natif</span>
       <span class="badge orange">Open Source · Go</span>
+      <span class="badge green">v2.0.0</span>
+      <span class="badge teal"  data-i18n="hero.badge.proxy">Proxy Multi-zone</span>
+      <span class="badge purple" data-i18n="hero.badge.hooks">Event Hooks</span>
     </div>
     <h1 data-i18n="hero.h1"><span class="hl-teal">Des agents</span><br>pour Ansible</h1>
     <p class="subtitle" data-i18n="hero.subtitle">
@@ -259,6 +264,37 @@ token      = ${ANSIBLE_RELAY_TOKEN}</div>
         <h3>AES-256-GCM</h3>
         <p data-i18n="security.aes.body">Les secrets serveur (RSA keypair, JWT secrets) sont chiffrés en base de données via AES-256-GCM dérivé de RSA_MASTER_KEY.</p>
       </div>
+      <div class="sec-card new-badge">
+        <span class="feature-new" data-i18n="badge.new">NOUVEAU v2.0</span>
+        <h3 data-i18n="security.relay.title">4ème rôle JWT : relay</h3>
+        <p data-i18n="security.relay.body">Le rôle <code>relay</code> (distinct de agent/plugin/admin) authentifie les relay nodes en mode pull. Créé via <code>POST /api/admin/tokens</code> — jamais partagé avec les agents.</p>
+      </div>
+    </div>
+
+    <!-- Schéma d'architecture sécurité v2.0 -->
+    <div class="arch-diagram" style="margin-top:2rem;font-size:0.82rem">
+<span class="c-relay">┌─────────────────────────────────────────────────────────────────┐</span>
+<span class="c-relay">│                     ZONE DE CONFIANCE                           │</span>
+<span class="c-relay">│                                                                 │</span>
+<span class="c-ansible">│  [Ansible Control Node]</span> <span class="c-arrow">──HTTPS (REST)──►</span> <span class="c-relay">[secagent-server]</span>         <span class="c-relay">│</span>
+<span class="c-relay">│                                (Proxy / Repeater)              │</span>
+<span class="c-relay">│                                      │                         │</span>
+<span class="c-relay">│           JWT rôle relay ◄───────────┤ WSS /ws/relay           │</span>
+<span class="c-relay">│                                      │                         │</span>
+<span class="c-relay">│          ┌───────────────────────────▼─────────────────────┐   │</span>
+<span class="c-relay">│          │              ZONES ISOLÉES (DMZ)                 │   │</span>
+<span class="c-relay">│          │                                                  │   │</span>
+<span class="c-relay">│          │  [</span><span class="c-agent">Relay DMZ1</span><span class="c-relay">]         [</span><span class="c-agent">Relay DMZ2</span><span class="c-relay">]           │   │</span>
+<span class="c-relay">│          │      ▲                       ▲                   │   │</span>
+<span class="c-relay">│          │  WSS (TLS) ↑            WSS (TLS) ↑             │   │</span>
+<span class="c-relay">│          │  initié par agent        initié par agent        │   │</span>
+<span class="c-relay">│          │      │                       │                   │   │</span>
+<span class="c-relay">│          │  [</span><span class="c-agent">Agent A</span><span class="c-relay">] [</span><span class="c-agent">Agent B</span><span class="c-relay">]   [</span><span class="c-agent">Agent C</span><span class="c-relay">] [</span><span class="c-agent">Agent D</span><span class="c-relay">]   │   │</span>
+<span class="c-relay">│          └──────────────────────────────────────────────────┘   │</span>
+<span class="c-relay">│                                                                 │</span>
+<span class="c-relay">│  Auth : RSA-4096 enrollment · JWT (agent/plugin/admin/relay)   │</span>
+<span class="c-relay">│         TLS WSS · Blacklist JTI · become_pass jamais loggué    │</span>
+<span class="c-relay">└─────────────────────────────────────────────────────────────────┘</span>
     </div>
 
     <table class="sec-table">
@@ -302,6 +338,147 @@ token      = ${ANSIBLE_RELAY_TOKEN}</div>
         </tr>
       </tbody>
     </table>
+  </div>
+</section>
+
+<!-- ══ PROXY / GATEWAY MULTI-ZONE (v2.0) ════════════════════════════════ -->
+<section id="proxy">
+  <div class="container">
+    <span class="section-tag" data-i18n="proxy.tag">Nouveau v2.0</span>
+    <h2 data-i18n="proxy.title">Proxy/Gateway multi-zone — secagent_repeater</h2>
+    <p class="section-lead" data-i18n="proxy.lead">
+      Ansible-SecAgent v2.0 introduit le mode proxy : un serveur central agrège plusieurs zones réseau isolées (DMZ, cloud privé, sites edge) en un point d'entrée unique. Ansible n'a besoin d'atteindre qu'un seul endpoint pour piloter l'intégralité du parc.
+    </p>
+
+    <div class="deploy-modes">
+      <div class="deploy-card mono">
+        <span class="deploy-tag mono" data-i18n="proxy.pull.tag">Mode Pull</span>
+        <h3 data-i18n="proxy.pull.title">Les relays initient la connexion</h3>
+        <p data-i18n="proxy.pull.desc">Chaque relay DMZ ouvre une WebSocket persistante vers le proxy central via <code>WSS /ws/relay</code>. Le relay s'authentifie avec un JWT rôle <code>relay</code>. Aucune connexion entrante depuis le proxy vers les DMZ.</p>
+        <ul class="deploy-specs">
+          <li data-i18n="proxy.pull.s1">Connexion sortante uniquement depuis chaque DMZ</li>
+          <li data-i18n="proxy.pull.s2">JWT rôle <code>relay</code> dédié (distinct de agent/plugin/admin)</li>
+          <li data-i18n="proxy.pull.s3">Protocole WS : 10 types de messages bidirectionnels</li>
+          <li data-i18n="proxy.pull.s4">Fermeture propre codes 4010/4011</li>
+        </ul>
+      </div>
+      <div class="deploy-card ha">
+        <span class="deploy-tag ha" data-i18n="proxy.push.tag">Mode Push</span>
+        <h3 data-i18n="proxy.push.title">Le proxy initie les connexions REST</h3>
+        <p data-i18n="proxy.push.desc">Le proxy contacte directement des relays enregistrés en DB via HTTP REST. Inventaire agrégé automatiquement toutes les 30s (configurable via <code>PROXY_INVENTORY_POLL_INTERVAL</code>).</p>
+        <ul class="deploy-specs">
+          <li data-i18n="proxy.push.s1">Relays enregistrés via <code>POST /api/admin/relays</code></li>
+          <li data-i18n="proxy.push.s2">Poll inventaire toutes les 30s (configurable)</li>
+          <li data-i18n="proxy.push.s3">Table DB : relay_nodes + relay_routing</li>
+          <li data-i18n="proxy.push.s4">CLI : <code>secagent-server relays list|add|remove|status</code></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="compat-grid" style="margin-top:2rem">
+      <div class="compat-card">
+        <h3 data-i18n="proxy.f1.title">Inventaire agrégé</h3>
+        <p data-i18n="proxy.f1.body"><code>GET /api/inventory</code> agrège automatiquement les agents de tous les relays connectés et les agents directs. Un seul appel, visibilité complète du parc.</p>
+      </div>
+      <div class="compat-card">
+        <h3 data-i18n="proxy.f2.title">Routage transparent</h3>
+        <p data-i18n="proxy.f2.body"><code>/api/exec/{host}</code>, <code>/api/upload/{host}</code>, <code>/api/fetch/{host}</code> routés automatiquement vers le relay propriétaire de l'hôte via la table <code>relay_routing</code>.</p>
+      </div>
+      <div class="compat-card">
+        <h3 data-i18n="proxy.f3.title">Chaînage proxy→proxy</h3>
+        <p data-i18n="proxy.f3.body">Topologies hiérarchiques multi-niveaux supportées (<code>is_proxy: true</code> dans <code>relay_hello</code>). Protection anti-boucle via en-tête <code>X-Relay-Hops</code> (budget 8, HTTP 508 si épuisé).</p>
+      </div>
+      <div class="compat-card">
+        <h3 data-i18n="proxy.f4.title">Docker Compose multi-zones</h3>
+        <p data-i18n="proxy.f4.body">Topologie qualif incluse : proxy + 2 relays DMZ + agents simulés, réseaux isolés. Prêt en une commande.</p>
+      </div>
+    </div>
+
+    <div class="arch-diagram" style="margin-top:2rem">
+<span class="c-relay"># Démarrage mode repeater (proxy central)</span>
+<span class="t-prompt">$</span> <span class="t-cmd">PROXY_MODE=true \</span>
+<span>  PROXY_RELAYS='[{"url":"http://relay-dmz1:7770","mode":"push"}]' \</span>
+<span>  JWT_SECRET_KEY=&lt;key&gt; ADMIN_TOKEN=&lt;token&gt; ./secagent-server</span>
+
+<span class="c-relay"># Ou via Docker Compose multi-zones</span>
+<span class="t-prompt">$</span> <span class="t-cmd">cd DEPLOYMENT/qualif</span>
+<span class="t-prompt">$</span> <span class="t-cmd">docker compose -f docker-compose.proxy.yml up -d</span>
+<span class="t-dim"># → proxy + relay-dmz1 + relay-dmz2 + agents simulés démarrés</span>
+
+<span class="c-relay"># Gérer les relays depuis la CLI</span>
+<span class="t-prompt">$</span> <span class="t-cmd">secagent-server relays list --format table</span>
+<span class="t-head">ID    URL                    MODE   STATUS     AGENTS</span>
+<span class="t-ok">1     http://relay-dmz1:7770  push   connected  3</span>
+<span class="t-ok">2     http://relay-dmz2:7771  push   connected  2</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══ EVENT HOOKS (v1.1) ════════════════════════════════════════════════ -->
+<section id="hooks">
+  <div class="container">
+    <span class="section-tag" data-i18n="hooks.tag">Nouveau v1.1</span>
+    <h2 data-i18n="hooks.title">Event Hooks — Actions configurables par JSON</h2>
+    <p class="section-lead" data-i18n="hooks.lead">
+      Déclenchez automatiquement des actions (notifications, scripts, appels API, écriture de fichiers) sur les événements de vos agents relay. Configuration zéro-code via un fichier JSON — hot-reload via SIGHUP.
+    </p>
+
+    <div class="compat-grid">
+      <div class="compat-card">
+        <h3 data-i18n="hooks.t1.title">4 types d'actions</h3>
+        <p data-i18n="hooks.t1.body"><code>shell</code> — exécute un script système<br><code>file</code> — écrit dans un fichier de log<br><code>api</code> — appel HTTP avec méthode configurable<br><code>webhook</code> — HTTP POST signé HMAC-SHA256</p>
+      </div>
+      <div class="compat-card">
+        <h3 data-i18n="hooks.t2.title">Événements disponibles</h3>
+        <p data-i18n="hooks.t2.body"><code>agent.connected</code> — connexion WSS établie<br><code>agent.disconnected</code> — déconnexion WSS<br><code>task.completed</code> — tâche terminée avec succès<br><code>task.failed</code> — tâche en erreur</p>
+      </div>
+      <div class="compat-card">
+        <h3 data-i18n="hooks.t3.title">Templates de variables</h3>
+        <p data-i18n="hooks.t3.body">Injectez des variables dynamiques dans vos actions : <code>{{.AgentID}}</code>, <code>{{.Hostname}}</code>, <code>{{.Event}}</code>, <code>{{.Timestamp}}</code>, <code>{{.Status}}</code></p>
+      </div>
+      <div class="compat-card">
+        <h3 data-i18n="hooks.t4.title">Dispatcher asynchrone</h3>
+        <p data-i18n="hooks.t4.body">Queue interne de 1000 entrées, non-bloquant. Hot-reload via <code>SIGHUP</code> sans redémarrer le serveur. Log complet dans la table <code>action_log</code>.</p>
+      </div>
+    </div>
+
+    <!-- Exemple de configuration -->
+    <div class="arch-diagram" style="margin-top:2rem">
+<span class="c-relay"># ~/.secagent/hooks.json</span>
+{
+  <span class="c-ansible">"hooks"</span>: [
+    {
+      <span class="c-ansible">"event"</span>: <span class="t-ok">"agent.connected"</span>,
+      <span class="c-ansible">"action"</span>: {
+        <span class="c-ansible">"type"</span>: <span class="t-ok">"shell"</span>,
+        <span class="c-ansible">"command"</span>: <span class="t-ok">"notify-send 'Agent connecté: {{.AgentID}}'"</span>
+      }
+    },
+    {
+      <span class="c-ansible">"event"</span>: <span class="t-ok">"task.completed"</span>,
+      <span class="c-ansible">"action"</span>: {
+        <span class="c-ansible">"type"</span>: <span class="t-ok">"api"</span>,
+        <span class="c-ansible">"url"</span>: <span class="t-ok">"https://mon-cmdb/api/update"</span>,
+        <span class="c-ansible">"method"</span>: <span class="t-ok">"POST"</span>
+      }
+    },
+    {
+      <span class="c-ansible">"event"</span>: <span class="t-ok">"agent.disconnected"</span>,
+      <span class="c-ansible">"action"</span>: {
+        <span class="c-ansible">"type"</span>: <span class="t-ok">"webhook"</span>,
+        <span class="c-ansible">"url"</span>: <span class="t-ok">"https://alerting.example.com/relay"</span>,
+        <span class="c-ansible">"secret"</span>: <span class="t-ok">"${HMAC_SECRET}"</span>
+      }
+    }
+  ]
+}
+
+<span class="c-relay"># Consulter les logs d'exécution</span>
+<span class="t-prompt">$</span> <span class="t-cmd">secagent-server hooks log --limit 10 --event agent.connected</span>
+<span class="t-prompt">$</span> <span class="t-cmd">secagent-server hooks status</span>
+<span class="c-relay"># Hot-reload sans redémarrage</span>
+<span class="t-prompt">$</span> <span class="t-cmd">kill -SIGHUP $(pgrep secagent-server)</span>
+    </div>
   </div>
 </section>
 
@@ -359,7 +536,7 @@ token      = ${ANSIBLE_RELAY_TOKEN}</div>
     </div>
 
     <div class="version-block">
-      <span class="version-tag current">v1.1 — CLI Management</span>
+      <span class="version-tag">v1.1 — CLI Management</span>
       <ul class="feature-list">
         <li data-i18n="f11.1">CLI cobra intégrée dans le binaire secagent-server (zéro binaire supplémentaire)</li>
         <li data-i18n="f11.2">minions : list / get / suspend / resume / revoke / authorize / vars</li>
@@ -374,7 +551,7 @@ token      = ${ANSIBLE_RELAY_TOKEN}</div>
     </div>
 
     <div class="version-block">
-      <span class="version-tag current">v1.2 — Ansible Container</span>
+      <span class="version-tag">v1.2 — Ansible Container</span>
       <ul class="feature-list">
         <li data-i18n="f12.1">Container relay-ansible : multi-stage build (Go builder + Python runtime)</li>
         <li data-i18n="f12.2">secagent-inventory : binaire Go standalone intégré dans le container</li>
@@ -385,6 +562,34 @@ token      = ${ANSIBLE_RELAY_TOKEN}</div>
         <li data-i18n="f12.7">Network : relay-ansible sur ansible_server_default (connecté à relay-api)</li>
         <li data-i18n="f12.8">Dockerfile : golang:1.25-alpine (Stage 1) → python:3.11-slim (Stage 2)</li>
         <li data-i18n="f12.9">Phase 11 COMPLETE : tous les composants Ansible natif + relay intégrés et testés ✅</li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <span class="version-tag">v1.1.0 — Event Hooks Unifiés</span>
+      <ul class="feature-list">
+        <li data-i18n="feh.1">Système de hooks unifié (<code>internal/hooks/</code>) — actions déclenchées par événements agent</li>
+        <li data-i18n="feh.2">4 types d'action : <code>webhook</code> (HMAC-SHA256), <code>shell</code> (subprocess + env SECAGENT_*), <code>file</code> (append O_CREATE), <code>api</code> (méthode configurable)</li>
+        <li data-i18n="feh.3">Moteur de template : <code>{{hostname}}</code>, <code>{{event}}</code>, <code>{{timestamp}}</code>, <code>{{status}}</code>, <code>{{enrolled_at}}</code></li>
+        <li data-i18n="feh.4">Dispatcher asynchrone (queue 1000, non-bloquant) avec hot-reload via SIGHUP</li>
+        <li data-i18n="feh.5">CLI : <code>secagent-server hooks status</code> et <code>hooks log --limit --event --hostname --format</code></li>
+        <li data-i18n="feh.6">Table <code>action_log</code> — trace toutes les exécutions d'actions en DB</li>
+        <li data-i18n="feh.7">Route <code>GET /api/admin/hooks/log</code> — consultation via API admin</li>
+      </ul>
+    </div>
+
+    <div class="version-block">
+      <span class="version-tag current">v2.0.0 — Proxy/Gateway multi-zone (secagent_repeater)</span>
+      <ul class="feature-list">
+        <li data-i18n="f20.1">Mode Proxy (<code>PROXY_MODE=true</code>) — agrégation multi-zones (DMZ, cloud privé, edge) en un point d'entrée unique</li>
+        <li data-i18n="f20.2">Mode pull : les relays initient la connexion vers le proxy via <code>WSS /ws/relay</code> (JWT rôle <code>relay</code>)</li>
+        <li data-i18n="f20.3">Mode push : le proxy contacte des relays enregistrés en DB via HTTP REST, poll inventaire 30s</li>
+        <li data-i18n="f20.4">Inventaire unifié : <code>GET /api/inventory</code> agrège agents de tous les relays + agents directs</li>
+        <li data-i18n="f20.5">Routage transparent : exec/upload/fetch routés automatiquement vers le relay propriétaire de l'hôte</li>
+        <li data-i18n="f20.6">Chaînage proxy→proxy : topologies hiérarchiques multi-niveaux avec protection anti-boucle (<code>X-Relay-Hops</code>)</li>
+        <li data-i18n="f20.7">Endpoints admin relays : POST/GET/DELETE/status sur <code>/api/admin/relays</code></li>
+        <li data-i18n="f20.8">CLI : <code>secagent-server relays list|get|status|add|remove</code></li>
+        <li data-i18n="f20.9">Docker Compose multi-zones : proxy + 2 relays DMZ + agents simulés — 917/920 tests PASS, QA VALIDATED</li>
       </ul>
     </div>
   </div>
@@ -518,6 +723,20 @@ kubectl exec -n ansible-relay deploy/relay-api -- secagent-server &lt;commande&g
 
     <div class="timeline">
       <div class="tl-item">
+        <div class="tl-dot done"></div>
+        <div class="tl-content">
+          <h3 data-i18n="roadmap.v11.title">✅ v1.1.0 — Event Hooks Unifiés <span class="tl-badge-done">LIVRÉ</span></h3>
+          <p data-i18n="roadmap.v11.body">Hooks configurables via JSON (shell, webhook, file, api), dispatcher asynchrone, hot-reload SIGHUP, CLI hooks status/log, table action_log.</p>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-dot done"></div>
+        <div class="tl-content">
+          <h3 data-i18n="roadmap.v20.title">✅ v2.0.0 — Proxy/Gateway multi-zone <span class="tl-badge-done">LIVRÉ</span></h3>
+          <p data-i18n="roadmap.v20.body">Mode proxy/repeater (pull + push), inventaire agrégé multi-zones, routage transparent, chaînage proxy→proxy, JWT rôle relay, Docker Compose multi-zones. 917/920 tests validés.</p>
+        </div>
+      </div>
+      <div class="tl-item">
         <div class="tl-dot future"></div>
         <div class="tl-content">
           <h3 data-i18n="roadmap.k8s.title">Production Kubernetes</h3>
@@ -553,6 +772,7 @@ kubectl exec -n ansible-relay deploy/relay-api -- secagent-server &lt;commande&g
       <div class="itab-nav">
         <button class="itab-btn active" onclick="showTab('docker', this)" data-i18n="install.tab.docker">Docker Compose</button>
         <button class="itab-btn"        onclick="showTab('manual', this)" data-i18n="install.tab.manual">Manuel (binaire)</button>
+        <button class="itab-btn"        onclick="showTab('proxy',  this)" data-i18n="install.tab.proxy">Mode Repeater</button>
         <button class="itab-btn"        onclick="showTab('k8s',    this)" data-i18n="install.tab.k8s">Kubernetes (Helm)</button>
       </div>
 
@@ -625,6 +845,76 @@ docker exec relay-api secagent-server minions authorize my-host \
 
 # Vérifier la connexion
 docker exec relay-api secagent-server minions list --format table</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB MODE REPEATER (v2.0) -->
+      <div id="tab-proxy" class="itab-content">
+        <div class="enroll-flow">
+          <strong data-i18n="ins.proxy.intro.title">Mode Proxy/Gateway multi-zone (v2.0) :</strong>
+          <span data-i18n="ins.proxy.intro.body"> un serveur central agrège plusieurs relays DMZ. Les agents des zones isolées se connectent à leur relay local — le proxy fait le pont vers Ansible.</span>
+        </div>
+        <div class="qs-steps">
+          <div class="qs-step">
+            <div class="step-num">1</div>
+            <div>
+              <h3 data-i18n="ins.proxy.s1">Compiler les binaires</h3>
+              <pre><code>git clone https://github.com/CCoupel/Ansible-SecAgent.git
+cd Ansible-SecAgent/GO
+go build ./cmd/server/     # secagent-server
+go build ./cmd/agent/      # secagent-minion
+go build ./cmd/inventory/  # secagent-inventory</code></pre>
+            </div>
+          </div>
+          <div class="qs-step">
+            <div class="step-num">2</div>
+            <div>
+              <h3 data-i18n="ins.proxy.s2">Démarrer le serveur proxy (point d'entrée central)</h3>
+              <pre><code>JWT_SECRET_KEY="$(openssl rand -hex 32)" \
+ADMIN_TOKEN="$(openssl rand -hex 16)" \
+PROXY_MODE=true \
+./secagent-server</code></pre>
+            </div>
+          </div>
+          <div class="qs-step">
+            <div class="step-num">3</div>
+            <div>
+              <h3 data-i18n="ins.proxy.s3">Démarrer les relays DMZ (un par zone)</h3>
+              <pre><code># Sur chaque serveur relay en DMZ
+JWT_SECRET_KEY="$(openssl rand -hex 32)" \
+ADMIN_TOKEN="$(openssl rand -hex 16)" \
+./secagent-server</code></pre>
+            </div>
+          </div>
+          <div class="qs-step">
+            <div class="step-num">4</div>
+            <div>
+              <h3 data-i18n="ins.proxy.s4">Enregistrer les relays depuis le proxy</h3>
+              <pre><code># Créer un token JWT rôle relay pour chaque zone
+./secagent-server tokens create --role relay --hostname relay-dmz1
+
+# Mode push : enregistrer le relay en DB
+./secagent-server relays add \
+  --url http://relay-dmz1:7770 \
+  --mode push
+
+# Vérifier le statut
+./secagent-server relays status --format table</code></pre>
+            </div>
+          </div>
+          <div class="qs-step">
+            <div class="step-num">5</div>
+            <div>
+              <h3 data-i18n="ins.proxy.s5">Ou : Docker Compose multi-zones (qualif)</h3>
+              <pre><code>cd DEPLOYMENT/qualif
+
+# Topologie proxy + 2 relays DMZ + agents simulés
+docker compose -f docker-compose.proxy.yml up -d
+
+# Vérifier les agents agrégés depuis le proxy
+docker exec proxy secagent-server inventory list --format table</code></pre>
             </div>
           </div>
         </div>
@@ -766,8 +1056,10 @@ kubectl exec -n ansible-relay deploy/relay-api -- \
 const T = {
   fr: {
     "nav.problem":"Problème","nav.solution":"Solution","nav.compat":"Compatibilité",
-    "nav.security":"Sécurité","nav.features":"Fonctionnalités","nav.mgmt":"Management","nav.install":"Installation",
-    "hero.badge.native":"Ansible natif",
+    "nav.security":"Sécurité","nav.proxy":"Proxy/Gateway","nav.hooks":"Event Hooks",
+    "nav.features":"Fonctionnalités","nav.mgmt":"Management","nav.install":"Installation",
+    "hero.badge.native":"Ansible natif","hero.badge.proxy":"Proxy Multi-zone","hero.badge.hooks":"Event Hooks",
+    "badge.new":"NOUVEAU v2.0",
     "hero.h1":'<span class="hl-teal">Des agents</span><br>pour Ansible',
     "hero.subtitle":"Exécutez vos playbooks sur des hôtes derrière NAT, firewall ou DMZ. Les agents initient eux-mêmes la connexion — vous n'ouvrez aucun port entrant.",
     "hero.cta.start":"Démarrage rapide","hero.cta.github":"Voir sur GitHub",
@@ -834,6 +1126,8 @@ const T = {
     "security.tls.body":"WSS (WebSocket over TLS) et HTTPS sur toutes les connexions. Terminaison TLS via Caddy. Aucun plain HTTP accepté.",
     "security.become.body":"Le mot de passe sudo/su est transmis via stdin chiffré et masqué dans tous les logs — agent, serveur et plugins Ansible.",
     "security.aes.body":"Les secrets serveur (RSA keypair, JWT secrets) sont chiffrés en base de données via AES-256-GCM dérivé de RSA_MASTER_KEY.",
+    "security.relay.title":"4ème rôle JWT : relay",
+    "security.relay.body":"Le rôle <code>relay</code> (distinct de agent/plugin/admin) authentifie les relay nodes en mode pull. Créé via <code>POST /api/admin/tokens</code> — jamais partagé avec les agents.",
     "security.table.threat":"Vecteur d'attaque","security.table.ssh":"SSH classique",
     "sec.r1.t":"Port entrant exposé","sec.r1.s":"Port 22 ouvert","sec.r1.r":"Aucun port entrant",
     "sec.r2.t":"Interception du token d'auth","sec.r2.s":"Clef SSH en clair sur disque","sec.r2.r":"JWT chiffré RSA-OAEP",
@@ -883,6 +1177,48 @@ const T = {
     "f12.7":"Network : relay-ansible sur ansible_server_default (connecté à relay-api)",
     "f12.8":"Dockerfile : golang:1.25-alpine (Stage 1) → python:3.11-slim (Stage 2)",
     "f12.9":"Phase 11 COMPLETE : tous les composants Ansible natif + relay intégrés et testés ✅",
+    "feh.1":"Système de hooks unifié (internal/hooks/) — actions déclenchées par événements agent",
+    "feh.2":"4 types d'action : webhook (HMAC-SHA256), shell (subprocess + env SECAGENT_*), file (append O_CREATE), api (méthode configurable)",
+    "feh.3":"Moteur de template : {{hostname}}, {{event}}, {{timestamp}}, {{status}}, {{enrolled_at}}",
+    "feh.4":"Dispatcher asynchrone (queue 1000, non-bloquant) avec hot-reload via SIGHUP",
+    "feh.5":"CLI : secagent-server hooks status et hooks log --limit --event --hostname --format",
+    "feh.6":"Table action_log — trace toutes les exécutions d'actions en DB",
+    "feh.7":"Route GET /api/admin/hooks/log — consultation via API admin",
+    "f20.1":"Mode Proxy (PROXY_MODE=true) — agrégation multi-zones (DMZ, cloud privé, edge) en un point d'entrée unique",
+    "f20.2":"Mode pull : les relays initient la connexion vers le proxy via WSS /ws/relay (JWT rôle relay)",
+    "f20.3":"Mode push : le proxy contacte des relays enregistrés en DB via HTTP REST, poll inventaire 30s",
+    "f20.4":"Inventaire unifié : GET /api/inventory agrège agents de tous les relays + agents directs",
+    "f20.5":"Routage transparent : exec/upload/fetch routés automatiquement vers le relay propriétaire de l'hôte",
+    "f20.6":"Chaînage proxy→proxy : topologies hiérarchiques multi-niveaux avec protection anti-boucle (X-Relay-Hops)",
+    "f20.7":"Endpoints admin relays : POST/GET/DELETE/status sur /api/admin/relays",
+    "f20.8":"CLI : secagent-server relays list|get|status|add|remove",
+    "f20.9":"Docker Compose multi-zones : proxy + 2 relays DMZ + agents simulés — 917/920 tests PASS, QA VALIDATED",
+    "proxy.tag":"Nouveau v2.0","proxy.title":"Proxy/Gateway multi-zone — secagent_repeater",
+    "proxy.lead":"Ansible-SecAgent v2.0 introduit le mode proxy : un serveur central agrège plusieurs zones réseau isolées (DMZ, cloud privé, sites edge) en un point d'entrée unique. Ansible n'a besoin d'atteindre qu'un seul endpoint pour piloter l'intégralité du parc.",
+    "proxy.pull.tag":"Mode Pull","proxy.pull.title":"Les relays initient la connexion",
+    "proxy.pull.desc":"Chaque relay DMZ ouvre une WebSocket persistante vers le proxy central via WSS /ws/relay. Le relay s'authentifie avec un JWT rôle relay. Aucune connexion entrante depuis le proxy vers les DMZ.",
+    "proxy.pull.s1":"Connexion sortante uniquement depuis chaque DMZ",
+    "proxy.pull.s2":"JWT rôle relay dédié (distinct de agent/plugin/admin)",
+    "proxy.pull.s3":"Protocole WS : 10 types de messages bidirectionnels",
+    "proxy.pull.s4":"Fermeture propre codes 4010/4011",
+    "proxy.push.tag":"Mode Push","proxy.push.title":"Le proxy initie les connexions REST",
+    "proxy.push.desc":"Le proxy contacte directement des relays enregistrés en DB via HTTP REST. Inventaire agrégé automatiquement toutes les 30s.",
+    "proxy.push.s1":"Relays enregistrés via POST /api/admin/relays",
+    "proxy.push.s2":"Poll inventaire toutes les 30s (configurable)",
+    "proxy.push.s3":"Table DB : relay_nodes + relay_routing",
+    "proxy.push.s4":"CLI : secagent-server relays list|add|remove|status",
+    "proxy.f1.title":"Inventaire agrégé","proxy.f1.body":"GET /api/inventory agrège automatiquement les agents de tous les relays connectés et les agents directs.",
+    "proxy.f2.title":"Routage transparent","proxy.f2.body":"/api/exec/{host}, /api/upload/{host}, /api/fetch/{host} routés automatiquement vers le relay propriétaire de l'hôte.",
+    "proxy.f3.title":"Chaînage proxy→proxy","proxy.f3.body":"Topologies hiérarchiques multi-niveaux supportées. Protection anti-boucle via X-Relay-Hops (budget 8, HTTP 508 si épuisé).",
+    "proxy.f4.title":"Docker Compose multi-zones","proxy.f4.body":"Topologie qualif incluse : proxy + 2 relays DMZ + agents simulés, réseaux isolés. Prêt en une commande.",
+    "hooks.tag":"Nouveau v1.1","hooks.title":"Event Hooks — Actions configurables par JSON",
+    "hooks.lead":"Déclenchez automatiquement des actions sur les événements de vos agents relay. Configuration zéro-code via un fichier JSON — hot-reload via SIGHUP.",
+    "hooks.t1.title":"4 types d'actions","hooks.t1.body":"shell — exécute un script système\nfile — écrit dans un fichier de log\napi — appel HTTP avec méthode configurable\nwebhook — HTTP POST signé HMAC-SHA256",
+    "hooks.t2.title":"Événements disponibles","hooks.t2.body":"agent.connected — connexion WSS établie\nagent.disconnected — déconnexion WSS\ntask.completed — tâche terminée avec succès\ntask.failed — tâche en erreur",
+    "hooks.t3.title":"Templates de variables","hooks.t3.body":"Injectez des variables dynamiques : {{.AgentID}}, {{.Hostname}}, {{.Event}}, {{.Timestamp}}, {{.Status}}",
+    "hooks.t4.title":"Dispatcher asynchrone","hooks.t4.body":"Queue interne de 1000 entrées, non-bloquant. Hot-reload via SIGHUP. Log complet dans la table action_log.",
+    "roadmap.v11.title":"✅ v1.1.0 — Event Hooks Unifiés","roadmap.v11.body":"Hooks configurables via JSON (shell, webhook, file, api), dispatcher asynchrone, hot-reload SIGHUP, CLI hooks status/log, table action_log.",
+    "roadmap.v20.title":"✅ v2.0.0 — Proxy/Gateway multi-zone","roadmap.v20.body":"Mode proxy/repeater (pull + push), inventaire agrégé multi-zones, routage transparent, chaînage proxy→proxy, JWT rôle relay, Docker Compose multi-zones. 917/920 tests validés.",
     "roadmap.title":"À venir",
     "roadmap.lead":"Les phases suivantes sont spécifiées dans ARCHITECTURE.md et prêtes à démarrer.",
     "roadmap.k8s.title":"Production Kubernetes",
@@ -893,7 +1229,11 @@ const T = {
     "roadmap.freeipa.body":"Intégration enterprise : enrollment via ipa-client-install, mTLS avec certificats FreeIPA (Dogtag), révocation CRL/OCSP, inventory plugin LDAP (hostgroups IPA → groupes Ansible natifs).",
     "install.tag":"Installation","install.title":"Démarrage rapide",
     "install.lead":"Choisissez votre méthode de déploiement.",
-    "install.tab.docker":"Docker Compose","install.tab.manual":"Manuel (binaire)","install.tab.k8s":"Kubernetes (Helm)",
+    "install.tab.docker":"Docker Compose","install.tab.manual":"Manuel (binaire)","install.tab.proxy":"Mode Repeater","install.tab.k8s":"Kubernetes (Helm)",
+    "ins.proxy.intro.title":"Mode Proxy/Gateway multi-zone (v2.0) :","ins.proxy.intro.body":" un serveur central agrège plusieurs relays DMZ. Les agents des zones isolées se connectent à leur relay local — le proxy fait le pont vers Ansible.",
+    "ins.proxy.s1":"Compiler les binaires","ins.proxy.s2":"Démarrer le serveur proxy (point d'entrée central)",
+    "ins.proxy.s3":"Démarrer les relays DMZ (un par zone)","ins.proxy.s4":"Enregistrer les relays depuis le proxy",
+    "ins.proxy.s5":"Ou : Docker Compose multi-zones (qualif)",
     "ins.enroll.title":"Cycle d'enrollment :",
     "ins.enroll.body":" l'agent génère sa paire RSA-4096 au <strong>premier démarrage</strong> et la stocke dans <code>/etc/secagent-minion/id_rsa</code> (mode 0600). Il tente immédiatement de s'enroller auprès du serveur — mais le serveur refuse tant que la clef publique n'est pas pré-autorisée. L'agent retente automatiquement avec un backoff exponentiel.",
     "ins.d.s1":"Cloner le dépôt et configurer","ins.d.s2":"Démarrer le serveur (relay-api + NATS + Caddy)",
@@ -921,8 +1261,10 @@ const T = {
   },
   en: {
     "nav.problem":"Problem","nav.solution":"Solution","nav.compat":"Compatibility",
-    "nav.security":"Security","nav.features":"Features","nav.mgmt":"Management","nav.install":"Install",
-    "hero.badge.native":"Ansible native",
+    "nav.security":"Security","nav.proxy":"Proxy/Gateway","nav.hooks":"Event Hooks",
+    "nav.features":"Features","nav.mgmt":"Management","nav.install":"Install",
+    "hero.badge.native":"Ansible native","hero.badge.proxy":"Multi-zone Proxy","hero.badge.hooks":"Event Hooks",
+    "badge.new":"NEW v2.0",
     "hero.h1":'<span class="hl-teal">Agents</span><br>for Ansible',
     "hero.subtitle":"Run your playbooks on hosts behind NAT, firewalls or DMZ. Agents initiate the connection themselves — you open zero inbound ports.",
     "hero.cta.start":"Quick start","hero.cta.github":"View on GitHub",
@@ -996,6 +1338,8 @@ const T = {
     "sec.r4.t":"Unauthorized agent","sec.r4.s":"Implicit TOFU possible","sec.r4.r":"Pre-authorize mandatory",
     "sec.r5.t":"Secret rotation","sec.r5.s":"Manual, with downtime","sec.r5.r":"Dual-key, grace period, zero downtime",
     "sec.r6.t":"become_pass leak in logs","sec.r6.s":"Risk depending on configuration","sec.r6.r":"Masked in all logs",
+    "security.relay.title":"4th JWT role: relay",
+    "security.relay.body":"The <code>relay</code> role (distinct from agent/plugin/admin) authenticates relay nodes in pull mode. Created via <code>POST /api/admin/tokens</code> — never shared with agents.",
     "features.tag":"Features","features.title":"Implemented by version",
     "features.lead":"Ansible-SecAgent is developed in incremental phases, each validated by automated tests and a security audit before deployment.",
     "f01.1":"RSA-4096 enrollment: key generation, POST /api/register, JWT OAEP",
@@ -1038,6 +1382,48 @@ const T = {
     "f12.7":"Network: relay-ansible on ansible_server_default (connected to relay-api)",
     "f12.8":"Dockerfile: golang:1.25-alpine (Stage 1) → python:3.11-slim (Stage 2)",
     "f12.9":"Phase 11 COMPLETE: all native Ansible components + relay integrated and tested ✅",
+    "feh.1":"Unified hook system (internal/hooks/) — actions triggered by agent events",
+    "feh.2":"4 action types: webhook (HMAC-SHA256), shell (subprocess + SECAGENT_* env), file (append O_CREATE), api (configurable method)",
+    "feh.3":"Template engine: {{hostname}}, {{event}}, {{timestamp}}, {{status}}, {{enrolled_at}}",
+    "feh.4":"Async dispatcher (queue 1000, non-blocking) with hot-reload via SIGHUP",
+    "feh.5":"CLI: secagent-server hooks status and hooks log --limit --event --hostname --format",
+    "feh.6":"action_log table — traces all action executions in DB",
+    "feh.7":"Route GET /api/admin/hooks/log — admin API access to logs",
+    "f20.1":"Proxy mode (PROXY_MODE=true) — multi-zone aggregation (DMZ, private cloud, edge) into a single entry point",
+    "f20.2":"Pull mode: relays initiate connection to proxy via WSS /ws/relay (JWT role relay)",
+    "f20.3":"Push mode: proxy contacts DB-registered relays via HTTP REST, 30s inventory poll",
+    "f20.4":"Unified inventory: GET /api/inventory aggregates agents from all relays + direct agents",
+    "f20.5":"Transparent routing: exec/upload/fetch auto-routed to the relay owning the host",
+    "f20.6":"Proxy→proxy chaining: multi-level topologies with loop protection (X-Relay-Hops)",
+    "f20.7":"Admin relay endpoints: POST/GET/DELETE/status on /api/admin/relays",
+    "f20.8":"CLI: secagent-server relays list|get|status|add|remove",
+    "f20.9":"Multi-zone Docker Compose: proxy + 2 DMZ relays + simulated agents — 917/920 tests PASS, QA VALIDATED",
+    "proxy.tag":"New in v2.0","proxy.title":"Multi-zone Proxy/Gateway — secagent_repeater",
+    "proxy.lead":"Ansible-SecAgent v2.0 introduces proxy mode: a central server aggregates multiple isolated network zones (DMZ, private cloud, edge sites) into a single entry point. Ansible only needs to reach one endpoint to manage your entire fleet.",
+    "proxy.pull.tag":"Pull Mode","proxy.pull.title":"Relays initiate the connection",
+    "proxy.pull.desc":"Each DMZ relay opens a persistent WebSocket to the central proxy via WSS /ws/relay. The relay authenticates with a JWT role relay. No inbound connection from proxy to DMZ.",
+    "proxy.pull.s1":"Outbound-only connections from each DMZ",
+    "proxy.pull.s2":"Dedicated relay JWT role (distinct from agent/plugin/admin)",
+    "proxy.pull.s3":"WS protocol: 10 bidirectional message types",
+    "proxy.pull.s4":"Clean close codes 4010/4011",
+    "proxy.push.tag":"Push Mode","proxy.push.title":"Proxy initiates REST connections",
+    "proxy.push.desc":"The proxy contacts DB-registered relays via HTTP REST. Inventory automatically aggregated every 30s.",
+    "proxy.push.s1":"Relays registered via POST /api/admin/relays",
+    "proxy.push.s2":"Inventory poll every 30s (configurable)",
+    "proxy.push.s3":"DB tables: relay_nodes + relay_routing",
+    "proxy.push.s4":"CLI: secagent-server relays list|add|remove|status",
+    "proxy.f1.title":"Aggregated inventory","proxy.f1.body":"GET /api/inventory automatically aggregates agents from all connected relays and direct agents. One call, full fleet visibility.",
+    "proxy.f2.title":"Transparent routing","proxy.f2.body":"/api/exec/{host}, /api/upload/{host}, /api/fetch/{host} automatically routed to the relay owning the host via relay_routing.",
+    "proxy.f3.title":"Proxy→proxy chaining","proxy.f3.body":"Multi-level hierarchical topologies supported. Loop protection via X-Relay-Hops header (budget 8, HTTP 508 if exhausted).",
+    "proxy.f4.title":"Multi-zone Docker Compose","proxy.f4.body":"Included qualif topology: proxy + 2 DMZ relays + simulated agents, isolated networks. Ready in one command.",
+    "hooks.tag":"New in v1.1","hooks.title":"Event Hooks — JSON-configured actions",
+    "hooks.lead":"Automatically trigger actions (notifications, scripts, API calls, file writes) on relay agent events. Zero-code config via JSON — hot-reload via SIGHUP.",
+    "hooks.t1.title":"4 action types","hooks.t1.body":"shell — run a system script\nfile — write to a log file\napi — HTTP call with configurable method\nwebhook — HTTP POST signed HMAC-SHA256",
+    "hooks.t2.title":"Available events","hooks.t2.body":"agent.connected — WSS connection established\nagent.disconnected — WSS disconnection\ntask.completed — task completed successfully\ntask.failed — task in error",
+    "hooks.t3.title":"Variable templates","hooks.t3.body":"Inject dynamic variables in your actions: {{.AgentID}}, {{.Hostname}}, {{.Event}}, {{.Timestamp}}, {{.Status}}",
+    "hooks.t4.title":"Async dispatcher","hooks.t4.body":"Internal queue of 1000 entries, non-blocking. Hot-reload via SIGHUP without server restart. Full log in action_log table.",
+    "roadmap.v11.title":"✅ v1.1.0 — Unified Event Hooks","roadmap.v11.body":"JSON-configured hooks (shell, webhook, file, api), async dispatcher, SIGHUP hot-reload, hooks status/log CLI, action_log table.",
+    "roadmap.v20.title":"✅ v2.0.0 — Multi-zone Proxy/Gateway","roadmap.v20.body":"Proxy/repeater mode (pull + push), multi-zone aggregated inventory, transparent routing, proxy→proxy chaining, relay JWT role, multi-zone Docker Compose. 917/920 tests validated.",
     "roadmap.title":"Coming next",
     "roadmap.lead":"The following phases are specified in ARCHITECTURE.md and ready to start.",
     "roadmap.k8s.title":"Production Kubernetes",
@@ -1048,7 +1434,11 @@ const T = {
     "roadmap.freeipa.body":"Enterprise integration: enrollment via ipa-client-install, mTLS with FreeIPA CA-signed certificates (Dogtag), CRL/OCSP revocation, LDAP inventory plugin (IPA hostgroups → native Ansible groups).",
     "install.tag":"Installation","install.title":"Quick start",
     "install.lead":"Choose your deployment method.",
-    "install.tab.docker":"Docker Compose","install.tab.manual":"Manual (binary)","install.tab.k8s":"Kubernetes (Helm)",
+    "install.tab.docker":"Docker Compose","install.tab.manual":"Manual (binary)","install.tab.proxy":"Repeater Mode","install.tab.k8s":"Kubernetes (Helm)",
+    "ins.proxy.intro.title":"Multi-zone Proxy/Gateway mode (v2.0):","ins.proxy.intro.body":" a central server aggregates multiple DMZ relays. Agents in isolated zones connect to their local relay — the proxy bridges to Ansible.",
+    "ins.proxy.s1":"Build binaries","ins.proxy.s2":"Start the proxy server (central entry point)",
+    "ins.proxy.s3":"Start DMZ relays (one per zone)","ins.proxy.s4":"Register relays from the proxy",
+    "ins.proxy.s5":"Or: multi-zone Docker Compose (qualif)",
     "ins.enroll.title":"Enrollment flow:",
     "ins.enroll.body":" the agent generates its RSA-4096 keypair on <strong>first start</strong> and stores it at <code>/etc/secagent-minion/id_rsa</code> (mode 0600). It immediately attempts enrollment — but the server rejects it until the public key is pre-authorized. The agent retries automatically with exponential backoff.",
     "ins.d.s1":"Clone the repo and configure","ins.d.s2":"Start the server (relay-api + NATS + Caddy)",

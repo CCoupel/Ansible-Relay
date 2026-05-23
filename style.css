@@ -376,6 +376,79 @@ footer a:hover { color: var(--rh-red); }
 footer .footer-links { display: flex; gap: 1.5rem; justify-content: center; margin-bottom: 1rem; flex-wrap: wrap; }
 footer .footer-brand { font-weight: 600; color: var(--text-secondary); margin-bottom: 0.3rem; }
 
+/* ── SECTION TAG / VERSION TAG ── */
+.section-tag {
+  display: inline-block;
+  background: var(--accent-soft); border: 1px solid rgba(238,0,0,0.3);
+  color: var(--rh-red); font-size: 0.72rem; font-weight: 700;
+  padding: 2px 10px; border-radius: 20px; letter-spacing: 0.08em;
+  text-transform: uppercase; margin-bottom: 0.75rem;
+}
+.version-tag {
+  display: inline-block;
+  background: var(--bg-card); border: 1px solid var(--border);
+  color: var(--text-secondary); font-size: 0.78rem; font-weight: 700;
+  padding: 3px 12px; border-radius: 4px; letter-spacing: 0.03em;
+  margin-bottom: 0.9rem; font-family: 'Courier New', monospace;
+}
+.version-tag.current {
+  background: rgba(94,168,94,0.12); border-color: rgba(94,168,94,0.4);
+  color: var(--green-ok);
+}
+
+/* ── EXTRA BADGE COLORS ── */
+.badge.orange {
+  background: rgba(200,120,40,0.12); border-color: rgba(200,120,40,0.3);
+  color: #e8a56f;
+}
+.badge.green {
+  background: rgba(94,168,94,0.12); border-color: rgba(94,168,94,0.3);
+  color: var(--green-ok);
+}
+.badge.teal {
+  background: rgba(40,180,160,0.12); border-color: rgba(40,180,160,0.3);
+  color: #40b4a0;
+}
+.badge.purple {
+  background: rgba(150,80,200,0.12); border-color: rgba(150,80,200,0.3);
+  color: #b47ee8;
+}
+
+/* ── ROADMAP TIMELINE ── */
+.timeline { margin-top: 2rem; }
+.tl-item {
+  display: flex; gap: 1.25rem; margin-bottom: 1.75rem;
+  align-items: flex-start;
+}
+.tl-dot {
+  width: 14px; height: 14px; border-radius: 50%;
+  flex-shrink: 0; margin-top: 4px;
+  border: 2px solid var(--border);
+  background: var(--bg-card);
+}
+.tl-dot.future { border-color: var(--text-muted); background: var(--bg-card); }
+.tl-dot.done   { border-color: var(--green-ok); background: var(--green-ok); }
+.tl-content h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.35rem; }
+.tl-content p  { font-size: 0.875rem; color: var(--text-secondary); line-height: 1.6; }
+.tl-badge-done {
+  display: inline-block;
+  background: rgba(94,168,94,0.15); border: 1px solid rgba(94,168,94,0.3);
+  color: var(--green-ok); font-size: 0.65rem; font-weight: 700;
+  padding: 1px 8px; border-radius: 3px; letter-spacing: 0.06em;
+  text-transform: uppercase; vertical-align: middle; margin-left: 6px;
+}
+
+/* ── FEATURE NEW BADGE ── */
+.feature-new {
+  display: inline-block;
+  background: rgba(40,180,160,0.15); border: 1px solid rgba(40,180,160,0.3);
+  color: #40b4a0; font-size: 0.65rem; font-weight: 700;
+  padding: 1px 8px; border-radius: 3px; letter-spacing: 0.06em;
+  text-transform: uppercase; margin-bottom: 0.5rem;
+}
+.sec-card.new-badge { border-color: rgba(40,180,160,0.3); }
+.sec-card.new-badge::before { background: #40b4a0; }
+
 /* ── RESPONSIVE ── */
 @media (max-width: 640px) {
   nav { padding: 0 1rem; }
