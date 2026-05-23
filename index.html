@@ -744,9 +744,9 @@ graph LR
     A3["💻 Agent\nLinux Host 3"]
 
     ANS -->|"REST HTTP / JWT plugin"| SRV
-    SRV -->|"WSS — WebSocket inversé"| A1
-    SRV -->|"WSS — WebSocket inversé"| A2
-    SRV -->|"WSS — WebSocket inversé"| A3
+    A1 -->|"WSS — agent initie"| SRV
+    A2 -->|"WSS — agent initie"| SRV
+    A3 -->|"WSS — agent initie"| SRV
 
     style ANS fill:#4A90D9,stroke:#2171B5,color:#fff
     style SRV fill:#E8A838,stroke:#C07C1A,color:#fff
@@ -771,21 +771,21 @@ graph TB
         R1["🖥️ Relay\nDMZ1"]
         B1["💻 Agent\nHost-A"]
         B2["💻 Agent\nHost-B"]
-        R1 -->|WSS| B1
-        R1 -->|WSS| B2
+        B1 -->|WSS| R1
+        B2 -->|WSS| R1
     end
 
     subgraph DMZ2["🔒 DMZ Zone 2"]
         R2["🖥️ Relay\nDMZ2"]
         B3["💻 Agent\nHost-C"]
         B4["💻 Agent\nHost-D"]
-        R2 -->|WSS| B3
-        R2 -->|WSS| B4
+        B3 -->|WSS| R2
+        B4 -->|WSS| R2
     end
 
     ANS -->|"REST HTTP / JWT plugin"| REP
-    REP -->|"JWT relay / WSS pull"| R1
-    REP -->|"JWT relay / REST push"| R2
+    R1 -->|"WSS pull — relay initie"| REP
+    REP -->|"REST push — proxy initie"| R2
 
     style ANS fill:#4A90D9,stroke:#2171B5,color:#fff
     style REP fill:#9B59B6,stroke:#7D3C98,color:#fff
