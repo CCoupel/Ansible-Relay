@@ -317,19 +317,10 @@ h2.section-title span { color: var(--rh-red); }
 .mgmt-card h4 { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--rh-red); }
 .mgmt-card p { font-size: 0.825rem; color: var(--text-secondary); margin-bottom: 0.6rem; }
 
-/* ── QUICKSTART / CODE BLOCKS ── */
-.quickstart-steps { display: flex; flex-direction: column; gap: 1.5rem; }
-.qs-step { display: flex; gap: 1.2rem; align-items: flex-start; }
-.qs-num {
-  flex-shrink: 0; width: 28px; height: 28px;
-  background: var(--rh-red); color: #fff;
-  border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  font-size: 0.8rem; font-weight: 700; margin-top: 2px;
-}
-.qs-step h4 { font-size: 0.92rem; margin-bottom: 0.4rem; }
+/* ── CODE BLOCKS ── */
 
 pre, code { font-family: 'Courier New', monospace; }
-pre.code-block, .install-panel pre {
+pre.code-block, .install-panel pre, .itab-content pre {
   background: var(--bg-code);
   border: 1px solid var(--border);
   border-radius: 5px; padding: 1rem 1.2rem;
@@ -342,15 +333,45 @@ pre.code-block, .install-panel pre {
 .c-ok    { color: var(--green-ok); }
 
 /* install tabs */
-.install-tabs { display: flex; gap: 4px; margin-bottom: 0; }
-.tab-btn {
-  background: var(--bg-card); border: 1px solid var(--border);
-  border-bottom: none; color: var(--text-muted); font-size: 0.82rem;
-  padding: 5px 14px; border-radius: 5px 5px 0 0; cursor: pointer; transition: all 0.2s;
+.install-tabs { margin-top: 1.5rem; }
+.itab-nav {
+  display: flex; gap: 4px; margin-bottom: 0;
+  border-bottom: 1px solid var(--border);
 }
-.tab-btn.active { background: var(--bg-code); border-color: var(--border); color: var(--text-primary); }
-.install-panel { display: none; }
-.install-panel.active { display: block; }
+.itab-btn {
+  background: transparent; border: 1px solid transparent;
+  border-bottom: none; color: var(--text-muted); font-size: 0.85rem; font-weight: 500;
+  padding: 8px 20px; border-radius: 6px 6px 0 0; cursor: pointer; transition: all 0.2s;
+}
+.itab-btn:hover { color: var(--text-secondary); background: var(--bg-card); }
+.itab-btn.active {
+  background: var(--bg-card); border-color: var(--border);
+  color: var(--text-primary); border-bottom-color: var(--bg-card);
+  margin-bottom: -1px;
+}
+.itab-content { display: none; padding: 2rem 0 0; }
+.itab-content.active { display: block; }
+
+/* enrollment note — au-dessus des onglets */
+.enroll-flow {
+  background: rgba(94,168,94,0.08); border: 1px solid rgba(94,168,94,0.25);
+  border-radius: 8px; padding: 1rem 1.25rem;
+  font-size: 0.875rem; line-height: 1.6; color: var(--text-secondary);
+  margin-bottom: 1.5rem;
+}
+.enroll-flow strong { color: var(--green-ok); }
+
+/* steps */
+.qs-steps { display: flex; flex-direction: column; gap: 1.75rem; }
+.qs-step { display: flex; gap: 1.2rem; align-items: flex-start; }
+.step-num {
+  flex-shrink: 0; width: 30px; height: 30px;
+  background: var(--rh-red); color: #fff;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 0.82rem; font-weight: 700; margin-top: 3px;
+}
+.qs-step h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-primary); }
+.qs-step pre { margin-top: 0.5rem; }
 
 /* ── STATS BAR ── */
 .stats-bar {

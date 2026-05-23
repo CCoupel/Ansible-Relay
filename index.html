@@ -895,6 +895,12 @@ graph TB
     <h2 data-i18n="install.title">Démarrage rapide</h2>
     <p data-i18n="install.lead">Choisissez votre méthode de déploiement.</p>
 
+    <!-- Cycle d'enrollment — commun à toutes les méthodes -->
+    <div class="enroll-flow">
+      <strong data-i18n="ins.enroll.title">Cycle d'enrollment :</strong>
+      <span data-i18n="ins.enroll.body"> l'agent génère sa paire RSA-4096 au <strong>premier démarrage</strong> et la stocke dans <code>/etc/secagent-minion/id_rsa</code> (mode 0600). Il tente immédiatement de s'enroller auprès du serveur — mais le serveur refuse tant que la clef publique n'est pas pré-autorisée. L'agent retente automatiquement avec un backoff exponentiel.</span>
+    </div>
+
     <div class="install-tabs">
       <div class="itab-nav">
         <button class="itab-btn active" onclick="showTab('docker', this)" data-i18n="install.tab.docker">Docker Compose</button>
@@ -904,17 +910,13 @@ graph TB
 
       <!-- TAB DOCKER -->
       <div id="tab-docker" class="itab-content active">
-        <div class="enroll-flow" data-i18n="ins.enroll.note">
-          <strong data-i18n="ins.enroll.title">Cycle d'enrollment :</strong>
-          <span data-i18n="ins.enroll.body"> l'agent génère sa paire RSA-4096 au <strong>premier démarrage</strong> et la stocke dans <code>/etc/secagent-minion/id_rsa</code> (mode 0600). Il tente immédiatement de s'enroller auprès du serveur — mais le serveur refuse tant que la clef publique n'est pas pré-autorisée. L'agent retente automatiquement avec un backoff exponentiel.</span>
-        </div>
         <div class="qs-steps">
           <div class="qs-step">
             <div class="step-num">1</div>
             <div>
-              <h3 data-i18n="ins.d.s1">Cloner le dépôt et configurer</h3>
+              <h3 data-i18n="ins.d.s1">Cloner le dépôt et configurer les variables</h3>
               <pre><code>git clone https://github.com/CCoupel/Ansible-SecAgent.git
-cd Ansible-SecAgent/GO
+cd Ansible-SecAgent/DEPLOYMENT/qualif
 
 export JWT_SECRET_KEY="$(openssl rand -hex 32)"
 export ADMIN_TOKEN="$(openssl rand -hex 16)"
@@ -924,121 +926,45 @@ export RSA_MASTER_KEY="$(openssl rand -hex 32)"</code></pre>
           <div class="qs-step">
             <div class="step-num">2</div>
             <div>
-              <h3 data-i18n="ins.d.s2">Démarrer le serveur (relay-api + NATS + Caddy)</h3>
-              <pre><code>docker compose up -d</code></pre>
+              <h3 data-i18n="ins.d.s2">Démarrer le relay (relay-api + NATS + Caddy)</h3>
+              <pre><code>docker compose up -d
+docker compose ps   # relay-api, nats, caddy doivent être "Up"</code></pre>
             </div>
           </div>
           <div class="qs-step">
             <div class="step-num">3</div>
             <div>
-              <h3 data-i18n="ins.d.s3">Déployer l'agent sur l'hôte cible</h3>
-              <pre><code># === Sur l'hôte cible (accès initial : SSH, USB, provisioning existant…) ===
-cp secagent-minion /usr/local/bin/secagent-minion
-
-# Variables d'environnement de l'agent
-export RELAY_SERVER_URL=wss://relay.example.com
-export RELAY_HOSTNAME=my-host
-# Clef privée : /etc/secagent-minion/id_rsa  (créée au 1er démarrage, mode 0600)
-# JWT         : /etc/secagent-minion/token.jwt (créé après enrollment réussi)
-
-./secagent-minion
-# → Génère RSA-4096 dans /etc/secagent-minion/id_rsa
-# → POST /api/register → 403 (pas encore autorisé) → retente en backoff</code></pre>
+              <h3 data-i18n="ins.d.s3">Démarrer l'agent sur l'hôte cible</h3>
+              <pre><code># Sur l'hôte cible — via SSH, provisioning, USB…
+docker run -d --name secagent-minion \
+  -e RELAY_SERVER_URL=wss://relay.example.com \
+  -e RELAY_HOSTNAME=my-host \
+  -v /etc/secagent-minion:/etc/secagent-minion \
+  ghcr.io/ccoupel/secagent-minion:latest
+# → Génère /etc/secagent-minion/id_rsa (RSA-4096)
+# → Tente l'enrollment → 403 → retente en backoff</code></pre>
             </div>
           </div>
           <div class="qs-step">
             <div class="step-num">4</div>
             <div>
               <h3 data-i18n="ins.d.s4">Autoriser l'agent (pre-authorize)</h3>
-              <pre><code># === Toujours sur l'hôte cible : extraire la clef publique ===
-openssl rsa -in /etc/secagent-minion/id_rsa -pubout 2>/dev/null
-# → -----BEGIN PUBLIC KEY-----
-#    MIICIjANBgkqhkiG9w0BAQ...
-#    -----END PUBLIC KEY-----
+              <pre><code># Récupérer la clef publique depuis l'hôte cible
+PUB=$(ssh user@my-host openssl rsa -in /etc/secagent-minion/id_rsa -pubout 2>/dev/null)
 
-# === Sur le serveur relay : enregistrer la clef publique ===
-docker exec relay-api secagent-server minions authorize my-host \
-  --pubkey "$(ssh user@my-host openssl rsa -in /etc/secagent-minion/id_rsa -pubout 2>/dev/null)"
-
-# → L'agent retente automatiquement et se connecte</code></pre>
+# Enregistrer la clef sur le relay
+docker exec relay-api secagent-server minions authorize my-host --pubkey "$PUB"
+# → L'agent retente et se connecte via WSS</code></pre>
             </div>
           </div>
           <div class="qs-step">
             <div class="step-num">5</div>
             <div>
               <h3 data-i18n="ins.d.s5">Lancer un playbook Ansible</h3>
-              <pre><code>ansible-playbook site.yml   # Aucune modification du playbook requise !
+              <pre><code>ansible-playbook site.yml   # Aucune modification du playbook requise
 
-# Vérifier la connexion
+# Vérifier les agents connectés
 docker exec relay-api secagent-server minions list --format table</code></pre>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- TAB MANUEL -->
-      <div id="tab-manual" class="itab-content">
-        <div class="enroll-flow">
-          <strong data-i18n="ins.enroll.title">Cycle d'enrollment :</strong>
-          <span data-i18n="ins.enroll.body"> l'agent génère sa paire RSA-4096 au <strong>premier démarrage</strong> et la stocke dans <code>/etc/secagent-minion/id_rsa</code> (mode 0600). Il tente immédiatement de s'enroller auprès du serveur — mais le serveur refuse tant que la clef publique n'est pas pré-autorisée. L'agent retente automatiquement avec un backoff exponentiel.</span>
-        </div>
-        <div class="qs-steps">
-          <div class="qs-step">
-            <div class="step-num">1</div>
-            <div>
-              <h3 data-i18n="ins.m.s1">Compiler depuis les sources</h3>
-              <pre><code>git clone https://github.com/CCoupel/Ansible-SecAgent.git
-cd Ansible-SecAgent/GO
-go build -o secagent-server    ./cmd/server
-go build -o secagent-minion     ./cmd/agent
-go build -o secagent-inventory ./cmd/inventory</code></pre>
-            </div>
-          </div>
-          <div class="qs-step">
-            <div class="step-num">2</div>
-            <div>
-              <h3 data-i18n="ins.m.s2">Démarrer NATS JetStream</h3>
-              <pre><code>nats-server -js -p 4222 &
-# ou : docker run -d --rm -p 4222:4222 nats:latest -js</code></pre>
-            </div>
-          </div>
-          <div class="qs-step">
-            <div class="step-num">3</div>
-            <div>
-              <h3 data-i18n="ins.m.s3">Démarrer le serveur relay</h3>
-              <pre><code>export JWT_SECRET_KEY="$(openssl rand -hex 32)"
-export ADMIN_TOKEN="$(openssl rand -hex 16)"
-export RSA_MASTER_KEY="$(openssl rand -hex 32)"
-export NATS_URL="nats://localhost:4222"
-
-./secagent-server serve --addr :8080</code></pre>
-            </div>
-          </div>
-          <div class="qs-step">
-            <div class="step-num">4</div>
-            <div>
-              <h3 data-i18n="ins.m.s4">Déployer l'agent sur l'hôte cible</h3>
-              <pre><code># === Sur l'hôte cible ===
-cp secagent-minion /usr/local/bin/
-cp secagent-minion.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now secagent-minion
-# → Génère /etc/secagent-minion/id_rsa (RSA-4096, mode 0600)
-# → Tente l'enrollment → refusé → retente en backoff</code></pre>
-            </div>
-          </div>
-          <div class="qs-step">
-            <div class="step-num">5</div>
-            <div>
-              <h3 data-i18n="ins.m.s5">Autoriser l'agent (pre-authorize)</h3>
-              <pre><code># === Sur l'hôte cible : extraire la clef publique depuis la clef privée ===
-openssl rsa -in /etc/secagent-minion/id_rsa -pubout 2>/dev/null
-
-# === Sur le serveur relay ===
-./secagent-server minions authorize my-host \
-  --pubkey "$(ssh user@my-host openssl rsa -in /etc/secagent-minion/id_rsa -pubout 2>/dev/null)"
-
-# → L'agent retente et se connecte. JWT stocké dans /etc/secagent-minion/token.jwt</code></pre>
             </div>
           </div>
         </div>
@@ -1080,13 +1006,76 @@ kubectl exec -n ansible-relay deploy/relay-api -- \
           <div class="qs-step">
             <div class="step-num">4</div>
             <div>
-              <h3 data-i18n="ins.k.s4">Gérer les agents et les clefs</h3>
+              <h3 data-i18n="ins.k.s4">Autoriser les agents et gérer les clefs</h3>
               <pre><code>kubectl exec -n ansible-relay deploy/relay-api -- \
+  secagent-server minions authorize my-host --pubkey "$(cat pubkey.pem)"
+
+kubectl exec -n ansible-relay deploy/relay-api -- \
   secagent-server minions list --format table
 
-# Rotation JWT zero downtime
+# Rotation JWT zero-downtime
 kubectl exec -n ansible-relay deploy/relay-api -- \
   secagent-server security keys rotate --grace 24h</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB BINAIRES -->
+      <div id="tab-manual" class="itab-content">
+        <div class="qs-steps">
+          <div class="qs-step">
+            <div class="step-num">1</div>
+            <div>
+              <h3 data-i18n="ins.m.s1">Compiler depuis les sources</h3>
+              <pre><code>git clone https://github.com/CCoupel/Ansible-SecAgent.git
+cd Ansible-SecAgent/GO
+go build -o secagent-server    ./cmd/server
+go build -o secagent-minion    ./cmd/agent
+go build -o secagent-inventory ./cmd/inventory</code></pre>
+            </div>
+          </div>
+          <div class="qs-step">
+            <div class="step-num">2</div>
+            <div>
+              <h3 data-i18n="ins.m.s2">Démarrer NATS JetStream</h3>
+              <pre><code>nats-server -js -p 4222 &
+# ou : docker run -d --rm -p 4222:4222 nats:latest -js</code></pre>
+            </div>
+          </div>
+          <div class="qs-step">
+            <div class="step-num">3</div>
+            <div>
+              <h3 data-i18n="ins.m.s3">Démarrer le serveur relay</h3>
+              <pre><code>export JWT_SECRET_KEY="$(openssl rand -hex 32)"
+export ADMIN_TOKEN="$(openssl rand -hex 16)"
+export RSA_MASTER_KEY="$(openssl rand -hex 32)"
+export NATS_URL="nats://localhost:4222"
+
+./secagent-server serve --addr :8080</code></pre>
+            </div>
+          </div>
+          <div class="qs-step">
+            <div class="step-num">4</div>
+            <div>
+              <h3 data-i18n="ins.m.s4">Déployer l'agent sur l'hôte cible (systemd)</h3>
+              <pre><code># Sur l'hôte cible — via SSH, provisioning, USB…
+cp secagent-minion /usr/local/bin/
+cp secagent-minion.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now secagent-minion
+# → Génère /etc/secagent-minion/id_rsa (RSA-4096)
+# → Tente l'enrollment → 403 → retente en backoff</code></pre>
+            </div>
+          </div>
+          <div class="qs-step">
+            <div class="step-num">5</div>
+            <div>
+              <h3 data-i18n="ins.m.s5">Autoriser l'agent</h3>
+              <pre><code>PUB=$(ssh user@my-host openssl rsa -in /etc/secagent-minion/id_rsa -pubout 2>/dev/null)
+
+./secagent-server minions authorize my-host --pubkey "$PUB"
+# → L'agent retente et se connecte. JWT stocké dans /etc/secagent-minion/token.jwt</code></pre>
             </div>
           </div>
         </div>
