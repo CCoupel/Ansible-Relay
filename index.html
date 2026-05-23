@@ -756,39 +756,126 @@ graph LR
         </div>
       </div>
 
-      <div class="arch-card">
-        <h3 data-i18n="arch.repeater.title">Mode Repeater Multi-Zones</h3>
-        <p data-i18n="arch.repeater.desc">Un repeater agrège plusieurs relays DMZ isolés. Vue unifiée pour Ansible.</p>
+      <div class="arch-card arch-card--wide">
+        <h3 data-i18n="arch.pull.title">Mode Pull — le repeater se connecte aux relays</h3>
+        <p data-i18n="arch.pull.desc">Le repeater initie les connexions REST vers chaque relay DMZ. Convient quand le repeater a accès aux zones isolées.</p>
         <div class="mermaid">
 graph TB
     ANS["🎯 Ansible\nOrchestrator"]
 
-    subgraph TRUST["Zone de confiance"]
-        REP["🔀 secagent-server\nREPEATER"]
+    subgraph TRUST["☁️ Zone de confiance"]
+        REP["🔀 Repeater\nsecagent-server"]
     end
 
     subgraph DMZ1["🔒 DMZ Zone 1"]
-        R1["🖥️ Relay\nDMZ1"]
-        B1["💻 Agent\nHost-A"]
-        B2["💻 Agent\nHost-B"]
-        B1 -->|WSS| R1
-        B2 -->|WSS| R1
+        R1["🖥️ Relay DMZ1"]
+        B1["💻 Agent A"]
+        B2["💻 Agent B"]
+        B1 -->|"WSS\n(agent→relay)"| R1
+        B2 -->|"WSS\n(agent→relay)"| R1
     end
 
     subgraph DMZ2["🔒 DMZ Zone 2"]
-        R2["🖥️ Relay\nDMZ2"]
-        B3["💻 Agent\nHost-C"]
-        B4["💻 Agent\nHost-D"]
-        B3 -->|WSS| R2
-        B4 -->|WSS| R2
+        R2["🖥️ Relay DMZ2"]
+        B3["💻 Agent C"]
+        B4["💻 Agent D"]
+        B3 -->|"WSS\n(agent→relay)"| R2
+        B4 -->|"WSS\n(agent→relay)"| R2
     end
 
-    ANS -->|"REST HTTP / JWT plugin"| REP
-    R1 -->|"WSS pull — relay initie"| REP
-    REP -->|"REST push — proxy initie"| R2
+    ANS -->|"REST / JWT plugin"| REP
+    REP -->|"REST — repeater initie"| R1
+    REP -->|"REST — repeater initie"| R2
 
     style ANS fill:#4A90D9,stroke:#2171B5,color:#fff
     style REP fill:#9B59B6,stroke:#7D3C98,color:#fff
+    style R1 fill:#E8A838,stroke:#C07C1A,color:#fff
+    style R2 fill:#E8A838,stroke:#C07C1A,color:#fff
+    style B1 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+    style B2 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+    style B3 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+    style B4 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+        </div>
+      </div>
+
+      <div class="arch-card arch-card--wide">
+        <h3 data-i18n="arch.push.title">Mode Push — les relays se connectent au repeater</h3>
+        <p data-i18n="arch.push.desc">Chaque relay DMZ initie une connexion WSS persistante vers le repeater. Idéal quand les DMZ ont des règles firewall strictes (pas d'entrée).</p>
+        <div class="mermaid">
+graph TB
+    ANS["🎯 Ansible\nOrchestrator"]
+
+    subgraph TRUST["☁️ Zone de confiance"]
+        REP["🔀 Repeater\nsecagent-server"]
+    end
+
+    subgraph DMZ1["🔒 DMZ Zone 1"]
+        R1["🖥️ Relay DMZ1"]
+        B1["💻 Agent A"]
+        B2["💻 Agent B"]
+        B1 -->|"WSS\n(agent→relay)"| R1
+        B2 -->|"WSS\n(agent→relay)"| R1
+    end
+
+    subgraph DMZ2["🔒 DMZ Zone 2"]
+        R2["🖥️ Relay DMZ2"]
+        B3["💻 Agent C"]
+        B4["💻 Agent D"]
+        B3 -->|"WSS\n(agent→relay)"| R2
+        B4 -->|"WSS\n(agent→relay)"| R2
+    end
+
+    ANS -->|"REST / JWT plugin"| REP
+    R1 -->|"WSS — relay initie"| REP
+    R2 -->|"WSS — relay initie"| REP
+
+    style ANS fill:#4A90D9,stroke:#2171B5,color:#fff
+    style REP fill:#9B59B6,stroke:#7D3C98,color:#fff
+    style R1 fill:#E8A838,stroke:#C07C1A,color:#fff
+    style R2 fill:#E8A838,stroke:#C07C1A,color:#fff
+    style B1 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+    style B2 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+    style B3 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+    style B4 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+        </div>
+      </div>
+
+      <div class="arch-card arch-card--wide">
+        <h3 data-i18n="arch.chain.title">Chaînage — repeater intermédiaire</h3>
+        <p data-i18n="arch.chain.desc">Un repeater intermédiaire agrège ses relays locaux et se connecte à un repeater central. Topologies multi-niveaux sans exposition directe des DMZ profondes.</p>
+        <div class="mermaid">
+graph TB
+    ANS["🎯 Ansible\nOrchestrator"]
+
+    subgraph TRUST["☁️ Zone de confiance"]
+        REP1["🔀 Repeater Central"]
+    end
+
+    subgraph DMZ_MID["🔒 DMZ Intermédiaire"]
+        REP2["🔀 Repeater\nIntermédiaire"]
+        R1["🖥️ Relay"]
+        B1["💻 Agent A"]
+        B2["💻 Agent B"]
+        B1 -->|WSS| R1
+        B2 -->|WSS| R1
+        R1 -->|WSS| REP2
+    end
+
+    subgraph DMZ_DEEP["🔒 DMZ Profonde"]
+        R2["🖥️ Relay"]
+        B3["💻 Agent C"]
+        B4["💻 Agent D"]
+        B3 -->|WSS| R2
+        B4 -->|WSS| R2
+        R2 -->|WSS| REP2
+    end
+
+    ANS -->|"REST / JWT plugin"| REP1
+    REP2 -->|"WSS — repeater initie"| REP1
+
+    style ANS fill:#4A90D9,stroke:#2171B5,color:#fff
+    style REP1 fill:#9B59B6,stroke:#7D3C98,color:#fff
+    style REP2 fill:#8E44AD,stroke:#6C3483,color:#fff
     style R1 fill:#E8A838,stroke:#C07C1A,color:#fff
     style R2 fill:#E8A838,stroke:#C07C1A,color:#fff
     style B1 fill:#5BA85A,stroke:#3D7A3C,color:#fff
@@ -1302,8 +1389,12 @@ const T = {
     "arch.lead":"Deux topologies de déploiement selon vos besoins : un relay central pour les architectures simples, ou un repeater multi-zones pour les infrastructures segmentées.",
     "arch.simple.title":"Mode Standard",
     "arch.simple.desc":"Un relay central agrège les agents de votre infrastructure.",
-    "arch.repeater.title":"Mode Repeater Multi-Zones",
-    "arch.repeater.desc":"Un repeater agrège plusieurs relays DMZ isolés. Vue unifiée pour Ansible.",
+    "arch.pull.title":"Mode Pull — le repeater se connecte aux relays",
+    "arch.pull.desc":"Le repeater initie les connexions REST vers chaque relay DMZ. Convient quand le repeater a accès aux zones isolées.",
+    "arch.push.title":"Mode Push — les relays se connectent au repeater",
+    "arch.push.desc":"Chaque relay DMZ initie une connexion WSS persistante vers le repeater. Idéal quand les DMZ ont des règles firewall strictes (pas d'entrée).",
+    "arch.chain.title":"Chaînage — repeater intermédiaire",
+    "arch.chain.desc":"Un repeater intermédiaire agrège ses relays locaux et se connecte à un repeater central. Topologies multi-niveaux sans exposition directe des DMZ profondes.",
     "footer.github":"GitHub","footer.specs":"Specs techniques","footer.issues":"Issues"
   },
   en: {
@@ -1514,8 +1605,12 @@ const T = {
     "arch.lead":"Two deployment topologies to fit your needs: a central relay for simple architectures, or a multi-zone repeater for segmented infrastructures (DMZ, private cloud, edge sites).",
     "arch.simple.title":"Standard Mode",
     "arch.simple.desc":"A central relay aggregates your infrastructure agents.",
-    "arch.repeater.title":"Multi-Zone Repeater Mode",
-    "arch.repeater.desc":"A repeater aggregates multiple isolated DMZ relays. Unified view for Ansible.",
+    "arch.pull.title":"Pull Mode — repeater connects to relays",
+    "arch.pull.desc":"The repeater initiates REST connections to each DMZ relay. Best when the repeater has network access to isolated zones.",
+    "arch.push.title":"Push Mode — relays connect to the repeater",
+    "arch.push.desc":"Each DMZ relay initiates a persistent WSS connection to the repeater. Ideal for strict firewall rules where no inbound connection is allowed.",
+    "arch.chain.title":"Chaining — intermediate repeater",
+    "arch.chain.desc":"An intermediate repeater aggregates its local relays and connects upstream to a central repeater. Multi-level topologies without exposing deep DMZ segments.",
     "footer.github":"GitHub","footer.specs":"Technical specs","footer.issues":"Issues"
   }
 };
