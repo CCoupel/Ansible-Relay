@@ -6,6 +6,8 @@
   <title>Ansible-SecAgent — Des agents pour Ansible</title>
   <meta name="description" content="Exécutez des playbooks Ansible sur des hôtes derrière NAT, firewall ou DMZ. Connexions inversées, Zero Trust, TLS, JWT + RSA-4096.">
   <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default' });</script>
 </head>
 <body>
 
@@ -20,6 +22,7 @@
     <li><a href="#hooks"        data-i18n="nav.hooks">Event Hooks</a></li>
     <li><a href="#features"     data-i18n="nav.features">Fonctionnalités</a></li>
     <li><a href="#mgmt"         data-i18n="nav.mgmt">Management</a></li>
+    <li><a href="#architecture" data-i18n="nav.arch">Architecture</a></li>
     <li><a href="#install"      data-i18n="nav.install">Installation</a></li>
     <li><a href="https://github.com/CCoupel/Ansible-SecAgent">GitHub ↗</a></li>
   </ul>
@@ -137,22 +140,6 @@
       Ansible-SecAgent inverse le flux de contrôle. L'agent sur l'hôte cible initie une connexion WebSocket persistante vers le serveur relay. Ansible n'a besoin d'atteindre que le relay server — jamais les hôtes directement.
     </p>
 
-    <div class="arch-diagram"><span class="c-ansible">Ansible Control Node</span>
-<span class="c-arrow">  │ HTTPS (REST)</span>
-<span class="c-arrow">  ▼</span>
-<span class="c-relay">┌─────────────────────────────────────────┐</span>
-<span class="c-relay">│           Relay Server                  │</span>
-<span class="c-relay">│   Go · NATS JetStream · SQLite          │</span>
-<span class="c-relay">│   Auth JWT · Blacklist JTI · CLI        │</span>
-<span class="c-relay">└──────────────▲──────────────────────────┘</span>
-<span class="c-arrow">               │ WSS persistant (TLS)</span>
-<span class="c-arrow">               │ ↑ initié par l'agent</span>
-<span class="c-agent">┌──────────────┴──────────────────────────┐</span>
-<span class="c-agent">│   Agents (secagent-minion · systemd)    │</span>
-<span class="c-agent">│   host-A   host-B   host-C   host-N     │</span>
-<span class="c-agent">│   NAT · DMZ · Cloud privé · Edge        │</span>
-<span class="c-agent">└─────────────────────────────────────────┘</span></div>
-
     <!-- Deployment modes -->
     <div class="deploy-modes">
       <div class="deploy-card mono">
@@ -269,32 +256,6 @@ token      = ${ANSIBLE_RELAY_TOKEN}</div>
         <h3 data-i18n="security.relay.title">4ème rôle JWT : relay</h3>
         <p data-i18n="security.relay.body">Le rôle <code>relay</code> (distinct de agent/plugin/admin) authentifie les relay nodes en mode pull. Créé via <code>POST /api/admin/tokens</code> — jamais partagé avec les agents.</p>
       </div>
-    </div>
-
-    <!-- Schéma d'architecture sécurité v2.0 -->
-    <div class="arch-diagram" style="margin-top:2rem;font-size:0.82rem">
-<span class="c-relay">┌─────────────────────────────────────────────────────────────────┐</span>
-<span class="c-relay">│                     ZONE DE CONFIANCE                           │</span>
-<span class="c-relay">│                                                                 │</span>
-<span class="c-ansible">│  [Ansible Control Node]</span> <span class="c-arrow">──HTTPS (REST)──►</span> <span class="c-relay">[secagent-server]</span>         <span class="c-relay">│</span>
-<span class="c-relay">│                                (Proxy / Repeater)              │</span>
-<span class="c-relay">│                                      │                         │</span>
-<span class="c-relay">│           JWT rôle relay ◄───────────┤ WSS /ws/relay           │</span>
-<span class="c-relay">│                                      │                         │</span>
-<span class="c-relay">│          ┌───────────────────────────▼─────────────────────┐   │</span>
-<span class="c-relay">│          │              ZONES ISOLÉES (DMZ)                 │   │</span>
-<span class="c-relay">│          │                                                  │   │</span>
-<span class="c-relay">│          │  [</span><span class="c-agent">Relay DMZ1</span><span class="c-relay">]         [</span><span class="c-agent">Relay DMZ2</span><span class="c-relay">]           │   │</span>
-<span class="c-relay">│          │      ▲                       ▲                   │   │</span>
-<span class="c-relay">│          │  WSS (TLS) ↑            WSS (TLS) ↑             │   │</span>
-<span class="c-relay">│          │  initié par agent        initié par agent        │   │</span>
-<span class="c-relay">│          │      │                       │                   │   │</span>
-<span class="c-relay">│          │  [</span><span class="c-agent">Agent A</span><span class="c-relay">] [</span><span class="c-agent">Agent B</span><span class="c-relay">]   [</span><span class="c-agent">Agent C</span><span class="c-relay">] [</span><span class="c-agent">Agent D</span><span class="c-relay">]   │   │</span>
-<span class="c-relay">│          └──────────────────────────────────────────────────┘   │</span>
-<span class="c-relay">│                                                                 │</span>
-<span class="c-relay">│  Auth : RSA-4096 enrollment · JWT (agent/plugin/admin/relay)   │</span>
-<span class="c-relay">│         TLS WSS · Blacklist JTI · become_pass jamais loggué    │</span>
-<span class="c-relay">└─────────────────────────────────────────────────────────────────┘</span>
     </div>
 
     <table class="sec-table">
@@ -761,6 +722,85 @@ kubectl exec -n ansible-relay deploy/relay-api -- secagent-server &lt;commande&g
   </div>
 </section>
 
+<!-- ══ ARCHITECTURE ══════════════════════════════════════════════════════ -->
+<section id="architecture">
+  <div class="container">
+    <span class="section-tag" data-i18n="arch.tag">Architecture</span>
+    <h2 data-i18n="arch.title">Architecture</h2>
+    <p class="section-lead" data-i18n="arch.lead">
+      Deux topologies de déploiement selon vos besoins : un relay central pour les architectures simples, ou un repeater multi-zones pour les infrastructures segmentées (DMZ, cloud privé, sites edge).
+    </p>
+
+    <div class="arch-grid">
+      <div class="arch-card">
+        <h3 data-i18n="arch.simple.title">Mode Standard</h3>
+        <p data-i18n="arch.simple.desc">Un relay central agrège les agents de votre infrastructure.</p>
+        <div class="mermaid">
+graph LR
+    ANS["🎯 Ansible\nOrchestrator"]
+    SRV["🖥️ secagent-server\nRelay"]
+    A1["💻 Agent\nLinux Host 1"]
+    A2["💻 Agent\nLinux Host 2"]
+    A3["💻 Agent\nLinux Host 3"]
+
+    ANS -->|"REST HTTP / JWT plugin"| SRV
+    SRV -->|"WSS — WebSocket inversé"| A1
+    SRV -->|"WSS — WebSocket inversé"| A2
+    SRV -->|"WSS — WebSocket inversé"| A3
+
+    style ANS fill:#4A90D9,stroke:#2171B5,color:#fff
+    style SRV fill:#E8A838,stroke:#C07C1A,color:#fff
+    style A1 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+    style A2 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+    style A3 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+        </div>
+      </div>
+
+      <div class="arch-card">
+        <h3 data-i18n="arch.repeater.title">Mode Repeater Multi-Zones</h3>
+        <p data-i18n="arch.repeater.desc">Un repeater agrège plusieurs relays DMZ isolés. Vue unifiée pour Ansible.</p>
+        <div class="mermaid">
+graph TB
+    ANS["🎯 Ansible\nOrchestrator"]
+
+    subgraph TRUST["Zone de confiance"]
+        REP["🔀 secagent-server\nREPEATER"]
+    end
+
+    subgraph DMZ1["🔒 DMZ Zone 1"]
+        R1["🖥️ Relay\nDMZ1"]
+        B1["💻 Agent\nHost-A"]
+        B2["💻 Agent\nHost-B"]
+        R1 -->|WSS| B1
+        R1 -->|WSS| B2
+    end
+
+    subgraph DMZ2["🔒 DMZ Zone 2"]
+        R2["🖥️ Relay\nDMZ2"]
+        B3["💻 Agent\nHost-C"]
+        B4["💻 Agent\nHost-D"]
+        R2 -->|WSS| B3
+        R2 -->|WSS| B4
+    end
+
+    ANS -->|"REST HTTP / JWT plugin"| REP
+    REP -->|"JWT relay / WSS pull"| R1
+    REP -->|"JWT relay / REST push"| R2
+
+    style ANS fill:#4A90D9,stroke:#2171B5,color:#fff
+    style REP fill:#9B59B6,stroke:#7D3C98,color:#fff
+    style R1 fill:#E8A838,stroke:#C07C1A,color:#fff
+    style R2 fill:#E8A838,stroke:#C07C1A,color:#fff
+    style B1 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+    style B2 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+    style B3 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+    style B4 fill:#5BA85A,stroke:#3D7A3C,color:#fff
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ══ INSTALLATION ═══════════════════════════════════════════════════════ -->
 <section id="install">
   <div class="container">
@@ -1057,7 +1097,7 @@ const T = {
   fr: {
     "nav.problem":"Problème","nav.solution":"Solution","nav.compat":"Compatibilité",
     "nav.security":"Sécurité","nav.proxy":"Proxy/Gateway","nav.hooks":"Event Hooks",
-    "nav.features":"Fonctionnalités","nav.mgmt":"Management","nav.install":"Installation",
+    "nav.features":"Fonctionnalités","nav.mgmt":"Management","nav.arch":"Architecture","nav.install":"Installation",
     "hero.badge.native":"Ansible natif","hero.badge.proxy":"Proxy Multi-zone","hero.badge.hooks":"Event Hooks",
     "badge.new":"NOUVEAU v2.0",
     "hero.h1":'<span class="hl-teal">Des agents</span><br>pour Ansible',
@@ -1257,12 +1297,19 @@ const T = {
     "mgmt.server.desc":"Consultez l'état du serveur relay : uptime, connexions actives, tâches exécutées, mémoire.",
     "mgmt.access.label":"Accès :",
     "mgmt.access.body":" La CLI lit les variables d'environnement du container (<code>ADMIN_TOKEN</code>, <code>JWT_SECRET_KEY</code>). Aucune configuration supplémentaire requise.",
+    "arch.tag":"Architecture",
+    "arch.title":"Architecture",
+    "arch.lead":"Deux topologies de déploiement selon vos besoins : un relay central pour les architectures simples, ou un repeater multi-zones pour les infrastructures segmentées.",
+    "arch.simple.title":"Mode Standard",
+    "arch.simple.desc":"Un relay central agrège les agents de votre infrastructure.",
+    "arch.repeater.title":"Mode Repeater Multi-Zones",
+    "arch.repeater.desc":"Un repeater agrège plusieurs relays DMZ isolés. Vue unifiée pour Ansible.",
     "footer.github":"GitHub","footer.specs":"Specs techniques","footer.issues":"Issues"
   },
   en: {
     "nav.problem":"Problem","nav.solution":"Solution","nav.compat":"Compatibility",
     "nav.security":"Security","nav.proxy":"Proxy/Gateway","nav.hooks":"Event Hooks",
-    "nav.features":"Features","nav.mgmt":"Management","nav.install":"Install",
+    "nav.features":"Features","nav.mgmt":"Management","nav.arch":"Architecture","nav.install":"Install",
     "hero.badge.native":"Ansible native","hero.badge.proxy":"Multi-zone Proxy","hero.badge.hooks":"Event Hooks",
     "badge.new":"NEW v2.0",
     "hero.h1":'<span class="hl-teal">Agents</span><br>for Ansible',
@@ -1462,6 +1509,13 @@ const T = {
     "mgmt.server.desc":"Check relay server state: uptime, active connections, tasks executed, memory.",
     "mgmt.access.label":"Access:",
     "mgmt.access.body":" The CLI reads environment variables from the container (<code>ADMIN_TOKEN</code>, <code>JWT_SECRET_KEY</code>). No extra configuration required.",
+    "arch.tag":"Architecture",
+    "arch.title":"Architecture",
+    "arch.lead":"Two deployment topologies to fit your needs: a central relay for simple architectures, or a multi-zone repeater for segmented infrastructures (DMZ, private cloud, edge sites).",
+    "arch.simple.title":"Standard Mode",
+    "arch.simple.desc":"A central relay aggregates your infrastructure agents.",
+    "arch.repeater.title":"Multi-Zone Repeater Mode",
+    "arch.repeater.desc":"A repeater aggregates multiple isolated DMZ relays. Unified view for Ansible.",
     "footer.github":"GitHub","footer.specs":"Technical specs","footer.issues":"Issues"
   }
 };

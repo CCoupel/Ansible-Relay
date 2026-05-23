@@ -449,6 +449,32 @@ footer .footer-brand { font-weight: 600; color: var(--text-secondary); margin-bo
 .sec-card.new-badge { border-color: rgba(40,180,160,0.3); }
 .sec-card.new-badge::before { background: #40b4a0; }
 
+/* ── ARCHITECTURE MERMAID ── */
+.arch-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin: 2rem 0;
+}
+.arch-card {
+  background: #f8f9fa;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+.arch-card h3 {
+  margin-bottom: 0.5rem;
+  color: #2c3e50;
+}
+.arch-card p {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-bottom: 1rem;
+}
+@media (max-width: 768px) {
+  .arch-grid { grid-template-columns: 1fr; }
+}
+
 /* ── RESPONSIVE ── */
 @media (max-width: 640px) {
   nav { padding: 0 1rem; }
