@@ -898,9 +898,8 @@ graph TB
     <div class="install-tabs">
       <div class="itab-nav">
         <button class="itab-btn active" onclick="showTab('docker', this)" data-i18n="install.tab.docker">Docker Compose</button>
-        <button class="itab-btn"        onclick="showTab('manual', this)" data-i18n="install.tab.manual">Manuel (binaire)</button>
-        <button class="itab-btn"        onclick="showTab('proxy',  this)" data-i18n="install.tab.proxy">Mode Repeater</button>
         <button class="itab-btn"        onclick="showTab('k8s',    this)" data-i18n="install.tab.k8s">Kubernetes (Helm)</button>
+        <button class="itab-btn"        onclick="showTab('manual', this)" data-i18n="install.tab.manual">Binaires</button>
       </div>
 
       <!-- TAB DOCKER -->
@@ -972,76 +971,6 @@ docker exec relay-api secagent-server minions authorize my-host \
 
 # Vérifier la connexion
 docker exec relay-api secagent-server minions list --format table</code></pre>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- TAB MODE REPEATER (v2.0) -->
-      <div id="tab-proxy" class="itab-content">
-        <div class="enroll-flow">
-          <strong data-i18n="ins.proxy.intro.title">Mode Proxy/Gateway multi-zone (v2.0) :</strong>
-          <span data-i18n="ins.proxy.intro.body"> un serveur central agrège plusieurs relays DMZ. Les agents des zones isolées se connectent à leur relay local — le proxy fait le pont vers Ansible.</span>
-        </div>
-        <div class="qs-steps">
-          <div class="qs-step">
-            <div class="step-num">1</div>
-            <div>
-              <h3 data-i18n="ins.proxy.s1">Compiler les binaires</h3>
-              <pre><code>git clone https://github.com/CCoupel/Ansible-SecAgent.git
-cd Ansible-SecAgent/GO
-go build ./cmd/server/     # secagent-server
-go build ./cmd/agent/      # secagent-minion
-go build ./cmd/inventory/  # secagent-inventory</code></pre>
-            </div>
-          </div>
-          <div class="qs-step">
-            <div class="step-num">2</div>
-            <div>
-              <h3 data-i18n="ins.proxy.s2">Démarrer le serveur proxy (point d'entrée central)</h3>
-              <pre><code>JWT_SECRET_KEY="$(openssl rand -hex 32)" \
-ADMIN_TOKEN="$(openssl rand -hex 16)" \
-PROXY_MODE=true \
-./secagent-server</code></pre>
-            </div>
-          </div>
-          <div class="qs-step">
-            <div class="step-num">3</div>
-            <div>
-              <h3 data-i18n="ins.proxy.s3">Démarrer les relays DMZ (un par zone)</h3>
-              <pre><code># Sur chaque serveur relay en DMZ
-JWT_SECRET_KEY="$(openssl rand -hex 32)" \
-ADMIN_TOKEN="$(openssl rand -hex 16)" \
-./secagent-server</code></pre>
-            </div>
-          </div>
-          <div class="qs-step">
-            <div class="step-num">4</div>
-            <div>
-              <h3 data-i18n="ins.proxy.s4">Enregistrer les relays depuis le proxy</h3>
-              <pre><code># Créer un token JWT rôle relay pour chaque zone
-./secagent-server tokens create --role relay --hostname relay-dmz1
-
-# Mode push : enregistrer le relay en DB
-./secagent-server relays add \
-  --url http://relay-dmz1:7770 \
-  --mode push
-
-# Vérifier le statut
-./secagent-server relays status --format table</code></pre>
-            </div>
-          </div>
-          <div class="qs-step">
-            <div class="step-num">5</div>
-            <div>
-              <h3 data-i18n="ins.proxy.s5">Ou : Docker Compose multi-zones (qualif)</h3>
-              <pre><code>cd DEPLOYMENT/qualif
-
-# Topologie proxy + 2 relays DMZ + agents simulés
-docker compose -f docker-compose.proxy.yml up -d
-
-# Vérifier les agents agrégés depuis le proxy
-docker exec proxy secagent-server inventory list --format table</code></pre>
             </div>
           </div>
         </div>
@@ -1158,6 +1087,108 @@ kubectl exec -n ansible-relay deploy/relay-api -- \
 # Rotation JWT zero downtime
 kubectl exec -n ansible-relay deploy/relay-api -- \
   secagent-server security keys rotate --grace 24h</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ REPEATER — INSTALLATION ════════════════════════════════════════════ -->
+<section id="install-repeater" class="install-repeater-section">
+  <div class="container">
+    <span class="section-tag repeater-tag" data-i18n="repeater.install.tag">Mode Repeater v2.0</span>
+    <h2 data-i18n="repeater.install.title">Déployer en mode Repeater multi-zones</h2>
+    <p data-i18n="repeater.install.lead">Le mode Repeater agrège plusieurs relays DMZ derrière un point d'entrée unique. Les agents restent dans leurs zones isolées — Ansible ne voit qu'un seul serveur.</p>
+
+    <div class="repeater-modes">
+      <div class="repeater-mode-card">
+        <div class="repeater-mode-badge" data-i18n="repeater.docker.badge">Docker Compose</div>
+        <h3 data-i18n="repeater.docker.title">Démarrage rapide — Docker multi-zones</h3>
+        <div class="qs-steps">
+          <div class="qs-step">
+            <div class="step-num">1</div>
+            <div>
+              <h3 data-i18n="rep.d.s1">Cloner et configurer</h3>
+              <pre><code>git clone https://github.com/CCoupel/Ansible-SecAgent.git
+cd Ansible-SecAgent/DEPLOYMENT/qualif
+
+export JWT_SECRET_KEY="$(openssl rand -hex 32)"
+export ADMIN_TOKEN="$(openssl rand -hex 16)"</code></pre>
+            </div>
+          </div>
+          <div class="qs-step">
+            <div class="step-num">2</div>
+            <div>
+              <h3 data-i18n="rep.d.s2">Démarrer la topologie multi-zones</h3>
+              <pre><code># Proxy central + Relay DMZ1 + Relay DMZ2
+docker compose -f docker-compose.proxy.yml up -d
+
+# Vérifier les 3 services
+docker compose -f docker-compose.proxy.yml ps</code></pre>
+            </div>
+          </div>
+          <div class="qs-step">
+            <div class="step-num">3</div>
+            <div>
+              <h3 data-i18n="rep.d.s3">Vérifier l'inventaire agrégé</h3>
+              <pre><code># Le proxy voit les agents des 2 zones
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  http://localhost:7770/api/agents
+
+# Ou via CLI
+docker exec proxy secagent-server inventory list --format table</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="repeater-mode-card">
+        <div class="repeater-mode-badge repeater-badge-manual" data-i18n="repeater.manual.badge">Binaires</div>
+        <h3 data-i18n="repeater.manual.title">Déploiement manuel — production</h3>
+        <div class="qs-steps">
+          <div class="qs-step">
+            <div class="step-num">1</div>
+            <div>
+              <h3 data-i18n="rep.m.s1">Démarrer le repeater (point d'entrée central)</h3>
+              <pre><code>JWT_SECRET_KEY="$(openssl rand -hex 32)" \
+ADMIN_TOKEN="$(openssl rand -hex 16)" \
+PROXY_MODE=true \
+./secagent-server</code></pre>
+            </div>
+          </div>
+          <div class="qs-step">
+            <div class="step-num">2</div>
+            <div>
+              <h3 data-i18n="rep.m.s2">Démarrer les relays dans chaque DMZ</h3>
+              <pre><code># Sur chaque serveur relay en zone isolée
+JWT_SECRET_KEY="$(openssl rand -hex 32)" \
+ADMIN_TOKEN="$(openssl rand -hex 16)" \
+./secagent-server</code></pre>
+            </div>
+          </div>
+          <div class="qs-step">
+            <div class="step-num">3</div>
+            <div>
+              <h3 data-i18n="rep.m.s3">Enregistrer les relays (mode push) ou les laisser se connecter (mode pull)</h3>
+              <pre><code># Mode push : le repeater contacte les relays
+./secagent-server relays add \
+  --url http://relay-dmz1:7770 \
+  --mode push
+
+# Mode pull : les relays se connectent au repeater
+# (configurer RELAY_UPSTREAM_URL sur chaque relay)
+export RELAY_UPSTREAM_URL=wss://repeater.example.com/ws/relay
+./secagent-server  # sur le relay DMZ</code></pre>
+            </div>
+          </div>
+          <div class="qs-step">
+            <div class="step-num">4</div>
+            <div>
+              <h3 data-i18n="rep.m.s4">Vérifier le statut</h3>
+              <pre><code>./secagent-server relays status --format table
+./secagent-server inventory list --format table</code></pre>
             </div>
           </div>
         </div>
@@ -1356,7 +1387,14 @@ const T = {
     "roadmap.freeipa.body":"Intégration enterprise : enrollment via ipa-client-install, mTLS avec certificats FreeIPA (Dogtag), révocation CRL/OCSP, inventory plugin LDAP (hostgroups IPA → groupes Ansible natifs).",
     "install.tag":"Installation","install.title":"Démarrage rapide",
     "install.lead":"Choisissez votre méthode de déploiement.",
-    "install.tab.docker":"Docker Compose","install.tab.manual":"Manuel (binaire)","install.tab.proxy":"Mode Repeater","install.tab.k8s":"Kubernetes (Helm)",
+    "install.tab.docker":"Docker Compose","install.tab.manual":"Binaires","install.tab.k8s":"Kubernetes (Helm)",
+    "repeater.install.tag":"Mode Repeater v2.0","repeater.install.title":"Déployer en mode Repeater multi-zones",
+    "repeater.install.lead":"Le mode Repeater agrège plusieurs relays DMZ derrière un point d'entrée unique. Les agents restent dans leurs zones isolées — Ansible ne voit qu'un seul serveur.",
+    "repeater.docker.badge":"Docker Compose","repeater.docker.title":"Démarrage rapide — Docker multi-zones",
+    "repeater.manual.badge":"Binaires","repeater.manual.title":"Déploiement manuel — production",
+    "rep.d.s1":"Cloner et configurer","rep.d.s2":"Démarrer la topologie multi-zones","rep.d.s3":"Vérifier l'inventaire agrégé",
+    "rep.m.s1":"Démarrer le repeater (point d'entrée central)","rep.m.s2":"Démarrer les relays dans chaque DMZ",
+    "rep.m.s3":"Enregistrer les relays (push) ou les laisser se connecter (pull)","rep.m.s4":"Vérifier le statut",
     "ins.proxy.intro.title":"Mode Proxy/Gateway multi-zone (v2.0) :","ins.proxy.intro.body":" un serveur central agrège plusieurs relays DMZ. Les agents des zones isolées se connectent à leur relay local — le proxy fait le pont vers Ansible.",
     "ins.proxy.s1":"Compiler les binaires","ins.proxy.s2":"Démarrer le serveur proxy (point d'entrée central)",
     "ins.proxy.s3":"Démarrer les relays DMZ (un par zone)","ins.proxy.s4":"Enregistrer les relays depuis le proxy",
@@ -1572,7 +1610,14 @@ const T = {
     "roadmap.freeipa.body":"Enterprise integration: enrollment via ipa-client-install, mTLS with FreeIPA CA-signed certificates (Dogtag), CRL/OCSP revocation, LDAP inventory plugin (IPA hostgroups → native Ansible groups).",
     "install.tag":"Installation","install.title":"Quick start",
     "install.lead":"Choose your deployment method.",
-    "install.tab.docker":"Docker Compose","install.tab.manual":"Manual (binary)","install.tab.proxy":"Repeater Mode","install.tab.k8s":"Kubernetes (Helm)",
+    "install.tab.docker":"Docker Compose","install.tab.manual":"Binaries","install.tab.k8s":"Kubernetes (Helm)",
+    "repeater.install.tag":"Repeater Mode v2.0","repeater.install.title":"Deploy in Multi-Zone Repeater Mode",
+    "repeater.install.lead":"Repeater mode aggregates multiple DMZ relays behind a single entry point. Agents stay in their isolated zones — Ansible sees only one server.",
+    "repeater.docker.badge":"Docker Compose","repeater.docker.title":"Quick start — Multi-zone Docker",
+    "repeater.manual.badge":"Binaries","repeater.manual.title":"Manual deployment — production",
+    "rep.d.s1":"Clone and configure","rep.d.s2":"Start multi-zone topology","rep.d.s3":"Verify aggregated inventory",
+    "rep.m.s1":"Start the repeater (central entry point)","rep.m.s2":"Start relays in each DMZ",
+    "rep.m.s3":"Register relays (push) or let them connect (pull)","rep.m.s4":"Check status",
     "ins.proxy.intro.title":"Multi-zone Proxy/Gateway mode (v2.0):","ins.proxy.intro.body":" a central server aggregates multiple DMZ relays. Agents in isolated zones connect to their local relay — the proxy bridges to Ansible.",
     "ins.proxy.s1":"Build binaries","ins.proxy.s2":"Start the proxy server (central entry point)",
     "ins.proxy.s3":"Start DMZ relays (one per zone)","ins.proxy.s4":"Register relays from the proxy",

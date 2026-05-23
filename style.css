@@ -497,3 +497,43 @@ footer .footer-brand { font-weight: 600; color: var(--text-secondary); margin-bo
   .stats-bar { gap: 1.5rem; }
   .compat-table { font-size: 0.78rem; }
 }
+
+/* ── Repeater install section ─────────────────────────────────────────── */
+.install-repeater-section {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border-top: 2px solid #9B59B6;
+}
+.repeater-tag { background: #9B59B6 !important; color: #fff !important; }
+.repeater-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin-top: 2rem;
+}
+.repeater-mode-card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(155,89,182,0.3);
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+.repeater-mode-badge {
+  display: inline-block;
+  background: #9B59B6;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.7rem;
+  border-radius: 4px;
+  margin-bottom: 0.75rem;
+}
+.repeater-badge-manual { background: #E8A838; }
+.repeater-mode-card h3 {
+  font-size: 1rem;
+  color: var(--text-primary);
+  margin-bottom: 1.25rem;
+}
+@media (max-width: 768px) {
+  .repeater-modes { grid-template-columns: 1fr; }
+}
